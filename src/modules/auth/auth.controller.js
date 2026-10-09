@@ -89,6 +89,7 @@ export async function me(req, res, next) {
           phone: req.user.phone,
           status: req.user.status,
           role: req.user.role,
+          permissions: req.user.permissions || [],
           emailVerified: Boolean(
             req.user.email_verified_at
           ),

@@ -1,3 +1,4 @@
+import path from "path";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -6,6 +7,8 @@ import rateLimit from "express-rate-limit";
 
 import authRoutes from "./modules/auth/auth.routes.js";
 import merchantRoutes from "./modules/merchants/merchant.routes.js";
+import adminRoutes from "./modules/admin/admin.routes.js";
+import publicRoutes from "./modules/public/public.routes.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 
 import { env } from "./config/env.js";
@@ -21,7 +24,17 @@ app.use(
   })
 );
 
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
+
+// Serve public CMS uploaded media assets
+app.use(
+  "/uploads/cms",
+  express.static(path.join(process.cwd(), "storage", "public_cms"))
+);
 
 app.use(
   express.json({
@@ -64,6 +77,16 @@ app.use(
 app.use(
   "/api/v1/merchants",
   merchantRoutes
+);
+
+app.use(
+  "/api/v1/admin",
+  adminRoutes
+);
+
+app.use(
+  "/api/v1/public",
+  publicRoutes
 );
 
 app.use(errorHandler);

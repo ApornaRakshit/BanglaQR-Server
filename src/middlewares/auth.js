@@ -1,5 +1,4 @@
 import jwt from "jsonwebtoken";
-
 import { env } from "../config/env.js";
 import { db } from "../config/db.js";
 
@@ -14,10 +13,7 @@ export async function requireAuth(req, res, next) {
       });
     }
 
-    const payload = jwt.verify(
-      token,
-      env.jwt.accessSecret
-    );
+    const payload = jwt.verify(token, env.jwt.accessSecret);
 
     const [rows] = await db.execute(
       `
@@ -29,7 +25,8 @@ export async function requireAuth(req, res, next) {
           u.email_verified_at,
           u.phone_verified_at,
           u.two_factor_enabled,
-          r.name AS role
+          r.name AS role,
+          r.id AS role_id
         FROM users u
         LEFT JOIN user_roles ur
           ON ur.user_id = u.id
@@ -57,8 +54,21 @@ export async function requireAuth(req, res, next) {
       });
     }
 
-    req.user = user;
+    // Fetch user permissions
+    const [permRows] = await db.execute(
+      `
+        SELECT DISTINCT p.name
+        FROM permissions p
+        JOIN role_permissions rp ON rp.permission_id = p.id
+        JOIN user_roles ur ON ur.role_id = rp.role_id
+        WHERE ur.user_id = ?
+      `,
+      [user.id]
+    );
 
+    user.permissions = permRows.map((p) => p.name);
+
+    req.user = user;
     next();
   } catch (error) {
     return res.status(401).json({
