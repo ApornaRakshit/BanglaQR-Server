@@ -22,10 +22,18 @@ export function errorHandler(
   const statusCode =
     error.statusCode || 500;
 
-  res.status(statusCode).json({
+  const payload = {
     success: false,
     message:
       error.message ||
       "Internal server error",
-  });
+  };
+
+  if (error.emailVerified !== undefined) payload.emailVerified = error.emailVerified;
+  if (error.phoneVerified !== undefined) payload.phoneVerified = error.phoneVerified;
+  if (error.email !== undefined) payload.email = error.email;
+  if (error.phone !== undefined) payload.phone = error.phone;
+  if (error.waitSeconds !== undefined) payload.waitSeconds = error.waitSeconds;
+
+  res.status(statusCode).json(payload);
 }

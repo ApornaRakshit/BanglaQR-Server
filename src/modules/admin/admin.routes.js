@@ -12,9 +12,11 @@ import { adminAddonsController } from "./addons/admin.addons.module.js";
 import { adminInvoicesController } from "./invoices/admin.invoices.module.js";
 import { adminSupportController } from "./support/admin.support.module.js";
 import { adminNotificationsController } from "./notifications/admin.notifications.module.js";
+import { adminInquiriesController } from "./inquiries/admin.inquiries.module.js";
 import { adminAuditController } from "./audit/admin.audit.module.js";
 import { adminSettingsController } from "./settings/admin.settings.module.js";
 import { adminProfileController } from "./profile/admin.profile.module.js";
+import { paymentsController } from "../payments/payments.controller.js";
 import cmsRoutes from "./cms/cms.routes.js";
 
 const router = express.Router();
@@ -61,27 +63,60 @@ router.patch(
 /* ==========================================================================
    5. GATEWAYS, APPLICATIONS & SERVICES
    ========================================================================== */
+router.get("/gateways/stats", requirePermission("gateway.view"), adminGatewaysController.getStats);
 router.get("/gateways", requirePermission("gateway.view"), adminGatewaysController.list);
 router.get("/gateways/applications", requirePermission("application.view"), adminGatewaysController.listApplications);
+router.post("/gateways/applications/:applicationId/review", requirePermission("gateway.edit"), adminGatewaysController.reviewApplication);
+router.put("/gateways/applications/:applicationId/review", requirePermission("gateway.edit"), adminGatewaysController.reviewApplication);
 router.get("/gateways/services", requirePermission("gateway.view"), adminGatewaysController.listServices);
+router.patch("/gateways/services/:serviceId/status", requirePermission("gateway.edit"), adminGatewaysController.updateServiceStatus);
 router.get("/gateways/:gatewayId", requirePermission("gateway.view"), adminGatewaysController.getById);
 router.post("/gateways", requirePermission("gateway.create"), adminGatewaysController.create);
 router.put("/gateways/:gatewayId", requirePermission("gateway.edit"), adminGatewaysController.update);
+router.patch("/gateways/:gatewayId/status", requirePermission("gateway.edit"), adminGatewaysController.updateStatus);
+router.patch("/gateways/:gatewayId/publish", requirePermission("gateway.edit"), adminGatewaysController.updatePublish);
 router.delete("/gateways/:gatewayId", requirePermission("gateway.delete"), adminGatewaysController.delete);
 
 /* ==========================================================================
    6. ADD-ONS MANAGEMENT
    ========================================================================== */
+router.get("/addons/stats", requirePermission("addon.view"), adminAddonsController.getStats);
+router.get("/addons/applications", requirePermission("addon.view"), adminAddonsController.listApplications);
+router.post("/addons/applications/:applicationId/review", requirePermission("addon.edit"), adminAddonsController.reviewApplication);
 router.get("/addons", requirePermission("addon.view"), adminAddonsController.list);
 router.get("/addons/:addonId", requirePermission("addon.view"), adminAddonsController.getById);
 router.post("/addons", requirePermission("addon.create"), adminAddonsController.create);
 router.put("/addons/:addonId", requirePermission("addon.edit"), adminAddonsController.update);
+router.patch("/addons/:addonId/status", requirePermission("addon.edit"), adminAddonsController.updateStatus);
+router.patch("/addons/:addonId/publish", requirePermission("addon.edit"), adminAddonsController.updatePublish);
 router.delete("/addons/:addonId", requirePermission("addon.delete"), adminAddonsController.delete);
+
+// Add-on Orders & DGePay Payments Management
+router.get("/addon-orders", requirePermission("addon.view"), paymentsController.listAdminOrders);
+router.get("/addon-orders/:orderId", requirePermission("addon.view"), paymentsController.getAdminOrderById);
+router.post("/addon-orders/:orderId/review", requirePermission("addon.edit"), paymentsController.reviewAdminOrder);
+router.patch("/addon-orders/:orderId/archive", requirePermission("addon.edit"), paymentsController.archiveAdminOrder);
+router.get("/orders", requirePermission("addon.view"), paymentsController.listAdminOrders);
+router.get("/orders/:orderId", requirePermission("addon.view"), paymentsController.getAdminOrderById);
+router.post("/orders/:orderId/review", requirePermission("addon.edit"), paymentsController.reviewAdminOrder);
+router.patch("/orders/:orderId/archive", requirePermission("addon.edit"), paymentsController.archiveAdminOrder);
+
+router.get("/addon-payments", requirePermission("addon.view"), paymentsController.listAdminPayments);
+router.get("/addon-payments/:paymentId", requirePermission("addon.view"), paymentsController.getAdminPaymentById);
+router.post("/addon-payments/:paymentId/reconcile", requirePermission("addon.edit"), paymentsController.reconcileAdminPayment);
+router.patch("/addon-payments/:paymentId/archive", requirePermission("addon.edit"), paymentsController.archiveAdminPayment);
+router.get("/payments", requirePermission("addon.view"), paymentsController.listAdminPayments);
+router.get("/payments/:paymentId", requirePermission("addon.view"), paymentsController.getAdminPaymentById);
+router.post("/payments/:paymentId/reconcile", requirePermission("addon.edit"), paymentsController.reconcileAdminPayment);
+router.patch("/payments/:paymentId/archive", requirePermission("addon.edit"), paymentsController.archiveAdminPayment);
 
 /* ==========================================================================
    7. INVOICE MANAGEMENT
    ========================================================================== */
+router.get("/invoices/stats", requirePermission("invoice.view"), adminInvoicesController.getStats);
+router.get("/invoices/export.xlsx", requirePermission("invoice.view"), adminInvoicesController.exportExcel);
 router.get("/invoices", requirePermission("invoice.view"), adminInvoicesController.list);
+router.get("/invoices/:invoiceId/pdf", requirePermission("invoice.view"), adminInvoicesController.downloadPdf);
 router.get("/invoices/:invoiceId", requirePermission("invoice.view"), adminInvoicesController.getById);
 router.patch("/invoices/:invoiceId/status", requirePermission("invoice.manage"), adminInvoicesController.updateStatus);
 
@@ -96,6 +131,7 @@ router.patch("/support/:ticketId/status", requirePermission("ticket.manage"), ad
 /* ==========================================================================
    9. NOTIFICATIONS
    ========================================================================== */
+router.get("/notifications/unread-count", requirePermission("notification.view"), adminNotificationsController.unreadCount);
 router.get("/notifications", requirePermission("notification.view"), adminNotificationsController.list);
 router.patch("/notifications/read-all", requirePermission("notification.view"), adminNotificationsController.markAllRead);
 router.patch("/notifications/:notifId/read", requirePermission("notification.view"), adminNotificationsController.markRead);
@@ -124,5 +160,13 @@ router.put("/profile/password", adminProfileController.changePassword);
    13. CMS HOMEPAGE & CONTENT MANAGEMENT
    ========================================================================== */
 router.use("/cms", cmsRoutes);
+
+/* ==========================================================================
+   14. CONTACT INQUIRIES & LEADS
+   ========================================================================== */
+router.get("/contact-inquiries", adminInquiriesController.list);
+router.get("/contact-inquiries/:id", adminInquiriesController.getById);
+router.patch("/contact-inquiries/:id/status", adminInquiriesController.updateStatus);
+router.delete("/contact-inquiries/:id", adminInquiriesController.delete);
 
 export default router;

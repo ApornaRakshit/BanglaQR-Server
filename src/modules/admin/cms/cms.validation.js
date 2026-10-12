@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const cmsHomepageSchema = z.object({
   navbar: z.object({
+    isActive: z.boolean().default(true).optional(),
     brandName: z.string().optional().default("BanglaQR"),
     logo: z.string().optional().default(""),
     language: z.string().optional().default("বাংলা"),
@@ -19,6 +20,7 @@ export const cmsHomepageSchema = z.object({
   }).passthrough().optional(),
 
   hero: z.object({
+    isActive: z.boolean().default(true).optional(),
     badgeText: z.string().optional().default(""),
     mainHeading: z.string().optional().default(""),
     highlightedHeading: z.string().optional().default(""),
@@ -41,6 +43,7 @@ export const cmsHomepageSchema = z.object({
   }).passthrough().optional(),
 
   partners: z.object({
+    isActive: z.boolean().default(true).optional(),
     heading: z.string().optional().default("আমাদের পেমেন্ট পার্টনারসমূহ"),
     partnersList: z.array(z.object({
       id: z.string(),
@@ -54,6 +57,7 @@ export const cmsHomepageSchema = z.object({
   }).passthrough().optional(),
 
   whyBanglaQr: z.object({
+    isActive: z.boolean().default(true).optional(),
     badge: z.string().optional().default(""),
     heading: z.string().optional().default(""),
     description: z.string().optional().default(""),
@@ -70,6 +74,7 @@ export const cmsHomepageSchema = z.object({
   }).passthrough().optional(),
 
   businessGrowth: z.object({
+    isActive: z.boolean().default(true).optional(),
     badge: z.string().optional().default(""),
     heading: z.string().optional().default(""),
     description: z.string().optional().default(""),
@@ -89,6 +94,7 @@ export const cmsHomepageSchema = z.object({
   }).passthrough().optional(),
 
   howItWorks: z.object({
+    isActive: z.boolean().default(true).optional(),
     badge: z.string().optional().default(""),
     heading: z.string().optional().default(""),
     description: z.string().optional().default(""),
@@ -104,6 +110,7 @@ export const cmsHomepageSchema = z.object({
   }).passthrough().optional(),
 
   dashboardShowcase: z.object({
+    isActive: z.boolean().default(true).optional(),
     badge: z.string().optional().default(""),
     heading: z.string().optional().default(""),
     description: z.string().optional().default(""),
@@ -121,6 +128,7 @@ export const cmsHomepageSchema = z.object({
   }).passthrough().optional(),
 
   businessSolutions: z.object({
+    isActive: z.boolean().default(true).optional(),
     badge: z.string().optional().default(""),
     heading: z.string().optional().default(""),
     description: z.string().optional().default(""),
@@ -137,6 +145,7 @@ export const cmsHomepageSchema = z.object({
   }).passthrough().optional(),
 
   packages: z.object({
+    isActive: z.boolean().default(true).optional(),
     badge: z.string().optional().default(""),
     heading: z.string().optional().default(""),
     description: z.string().optional().default(""),
@@ -159,6 +168,7 @@ export const cmsHomepageSchema = z.object({
   }).passthrough().optional(),
 
   testimonials: z.object({
+    isActive: z.boolean().default(true).optional(),
     badge: z.string().optional().default(""),
     heading: z.string().optional().default(""),
     description: z.string().optional().default(""),
@@ -177,6 +187,7 @@ export const cmsHomepageSchema = z.object({
   }).passthrough().optional(),
 
   finalCta: z.object({
+    isActive: z.boolean().default(true).optional(),
     heading: z.string().optional().default(""),
     description: z.string().optional().default(""),
     buttonText: z.string().optional().default(""),
@@ -184,7 +195,42 @@ export const cmsHomepageSchema = z.object({
     backgroundImage: z.string().optional().default(""),
   }).passthrough().optional(),
 
+  contact: z.object({
+    isActive: z.boolean().default(true).optional(),
+    badge: z.string().optional().default("GET IN TOUCH"),
+    heading: z.string().optional().default("Contact the Best Payment Partner in Bangladesh"),
+    title: z.string().optional().default("Contact the Best Payment Partner in Bangladesh"),
+    description: z.string().optional().default("Ready to digitize your business? Call us today or fill out the form for a free consultation and software live demonstration."),
+    subtitle: z.string().optional().default(""),
+    salesTitle: z.string().optional().default("Sales & Hotline"),
+    salesPhone: z.string().optional().default("09602-111215  09697-428578"),
+    salesHours: z.string().optional().default("Available Every Day 9:00 AM - 9:00 PM"),
+    hotlineTitle: z.string().optional().default("Sales & Hotline"),
+    hotlineNumbers: z.string().optional().default("09602-111215  09697-428578"),
+    hotlineAvailability: z.string().optional().default("Available 9:00 AM - 9:00 PM (Everyday)"),
+    emailTitle: z.string().optional().default("Email Inquiry"),
+    emailAddress: z.string().optional().default("info@csnbd.com"),
+    emailSubtitle: z.string().optional().default("We reply within 24 business hours"),
+    officeTitle: z.string().optional().default("Headquarters Office"),
+    officeAddress: z.string().optional().default("Wakil Tower (8th Floor) Ta-131, Gulshan-1 Badda Link Road, Gulshan, Dhaka-1212"),
+    formTitle: z.string().optional().default("Request a Free Demo / Quote"),
+    formSubtitle: z.string().optional().default("Fill up the form below and our software experts will contact you promptly."),
+    submitButtonText: z.string().optional().default("Contact Us"),
+    services: z.array(z.union([
+      z.string(),
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        description: z.string().optional().default(""),
+        isActive: z.boolean().default(true),
+        order: z.number().optional().default(1),
+      })
+    ])).optional().default([]),
+    servicesList: z.array(z.string()).optional().default([]),
+  }).passthrough().optional(),
+
   footer: z.object({
+    isActive: z.boolean().default(true).optional(),
     brandName: z.string().optional().default("BanglaQR"),
     logo: z.string().optional().default(""),
     description: z.string().optional().default(""),
@@ -208,9 +254,9 @@ export const cmsHomepageSchema = z.object({
     })).optional().default([]),
     socialLinks: z.array(z.object({
       id: z.string(),
-      platform: z.string(),
+      platform: z.string().optional().default(""),
       icon: z.string().optional().default(""),
-      url: z.string(),
+      url: z.string().optional().default(""),
       isActive: z.boolean().default(true),
       order: z.number().optional().default(1),
     })).optional().default([]),
@@ -223,4 +269,3 @@ export const cmsHomepageSchema = z.object({
     })).optional().default([]),
   }).passthrough().optional(),
 }).passthrough();
-

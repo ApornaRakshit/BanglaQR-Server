@@ -45,6 +45,12 @@ export const verifyOtpSchema = z.object({
     "email_verification",
     "phone_verification",
   ]),
+
+  email: z
+    .string()
+    .trim()
+    .email()
+    .optional(),
 });
 
 export const resendOtpSchema = z.object({
@@ -57,4 +63,30 @@ export const resendOtpSchema = z.object({
     "email_verification",
     "phone_verification",
   ]),
+
+  email: z
+    .string()
+    .trim()
+    .email()
+    .optional(),
+});
+
+export const forgotPasswordSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .email("Valid email address is required")
+    .max(255),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z
+    .string()
+    .trim()
+    .min(10, "Valid reset token is required"),
+
+  newPassword: z
+    .string()
+    .min(8, "Password must contain at least 8 characters")
+    .max(128),
 });

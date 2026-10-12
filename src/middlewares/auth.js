@@ -1,10 +1,12 @@
 import jwt from "jsonwebtoken";
-import { env } from "../config/env.js";
+import { env, isDevVerificationBypass } from "../config/env.js";
 import { db } from "../config/db.js";
 
 export async function requireAuth(req, res, next) {
   try {
-    const token = req.signedCookies?.bq_access;
+    const authHeader = req.headers.authorization;
+    const bearerToken = authHeader && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    const token = req.signedCookies?.bq_access || bearerToken;
 
     if (!token) {
       return res.status(401).json({
@@ -47,7 +49,14 @@ export async function requireAuth(req, res, next) {
 
     const user = rows[0];
 
-    if (user.status !== "active") {
+    if (user.status === "suspended") {
+      return res.status(403).json({
+        success: false,
+        message: "Account is suspended. Please contact support.",
+      });
+    }
+
+    if (user.status !== "active" && !isDevVerificationBypass()) {
       return res.status(403).json({
         success: false,
         message: `Account is ${user.status}`,

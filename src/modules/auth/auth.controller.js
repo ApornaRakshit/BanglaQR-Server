@@ -3,6 +3,9 @@ import {
   verifyOtp,
   loginUser,
   resendOtp,
+  requestPasswordReset,
+  verifyResetToken,
+  resetPassword,
 } from "./auth.service.js";
 
 import {
@@ -10,6 +13,8 @@ import {
   loginSchema,
   verifyOtpSchema,
   resendOtpSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
 } from "./auth.validation.js";
 
 export async function register(req, res, next) {
@@ -18,10 +23,22 @@ export async function register(req, res, next) {
 
     const result = await registerUser(data);
 
+    if (result.verificationBypassed && result.accessToken) {
+      res.cookie("bq_access", result.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite:
+          process.env.NODE_ENV === "production"
+            ? "strict"
+            : "lax",
+        signed: true,
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+    }
+
     res.status(201).json({
       success: true,
-      message:
-        "Account created. Please verify your email and phone.",
+      message: result.message || "Account created.",
       data: result,
     });
   } catch (error) {
@@ -64,13 +81,14 @@ export async function login(req, res, next) {
             ? "strict"
             : "lax",
         signed: true,
-        maxAge: 15 * 60 * 1000,
+        maxAge: 7 * 24 * 60 * 60 * 1000,
       })
       .json({
         success: true,
         message: "Login successful",
         data: {
           user: result.user,
+          token: result.accessToken,
         },
       });
   } catch (error) {
@@ -114,8 +132,76 @@ export async function resend(req, res, next) {
 
     res.json({
       success: true,
-      message: "Verification code sent successfully",
+      message: result.message || "Verification code sent successfully",
       data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function verificationStatus(req, res, next) {
+  try {
+    const destination = req.query.destination || req.query.email || req.query.phone;
+    if (!destination) {
+      return res.status(400).json({ success: false, message: "Destination is required" });
+    }
+
+    const { getVerificationStatus } = await import("./auth.service.js");
+    const result = await getVerificationStatus({ destination });
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function forgotPassword(req, res, next) {
+  try {
+    const data = forgotPasswordSchema.parse(req.body);
+    const result = await requestPasswordReset(data);
+
+    res.json({
+      success: true,
+      message: result.message,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function verifyResetTokenController(req, res, next) {
+  try {
+    const token = req.query.token || req.body?.token;
+    const result = await verifyResetToken({ token });
+
+    if (!result.valid) {
+      return res.status(400).json({
+        success: false,
+        message: result.message,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function resetPasswordController(req, res, next) {
+  try {
+    const data = resetPasswordSchema.parse(req.body);
+    const result = await resetPassword(data);
+
+    res.json({
+      success: true,
+      message: result.message,
     });
   } catch (error) {
     next(error);

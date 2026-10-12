@@ -26,7 +26,18 @@ export function createAccessToken(user) {
     },
     env.jwt.accessSecret,
     {
-      expiresIn: "15m",
+      expiresIn: "7d",
     }
   );
+}
+
+export function generateResetToken() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+export function hashResetToken(token) {
+  return crypto
+    .createHmac("sha256", env.otpHashSecret)
+    .update(token)
+    .digest("hex");
 }

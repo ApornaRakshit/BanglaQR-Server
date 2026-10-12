@@ -56,17 +56,25 @@ export const adminSupportRepository = {
       tickets: rows.map((r) => ({
         id: r.id,
         ticketNumber: r.ticket_number,
+        ticket_number: r.ticket_number,
         merchantId: r.merchant_id,
+        merchant_id: r.merchant_id,
         merchantCode: r.merchant_code,
+        merchant_code: r.merchant_code,
         companyName: r.company_name,
+        company_name: r.company_name,
         merchantEmail: r.merchant_email,
+        merchant_email: r.merchant_email,
         assignedAgent: r.agent_email || "Unassigned",
+        assigned_agent: r.agent_email || "Unassigned",
         subject: r.subject,
         priority: r.priority,
         status: r.status,
         category: r.category,
         createdAt: r.created_at,
+        created_at: r.created_at,
         updatedAt: r.updated_at,
+        updated_at: r.updated_at,
       })),
       total,
       page: Number(page),
@@ -111,28 +119,59 @@ export const adminSupportRepository = {
       ticket: {
         id: t.id,
         ticketNumber: t.ticket_number,
+        ticket_number: t.ticket_number,
         merchantId: t.merchant_id,
+        merchant_id: t.merchant_id,
         merchantCode: t.merchant_code,
+        merchant_code: t.merchant_code,
         companyName: t.company_name,
+        company_name: t.company_name,
         merchantEmail: t.merchant_email,
+        merchant_email: t.merchant_email,
         assignedAgent: t.agent_email || "Unassigned",
+        assigned_agent: t.agent_email || "Unassigned",
         subject: t.subject,
         priority: t.priority,
         status: t.status,
         category: t.category,
         createdAt: t.created_at,
+        created_at: t.created_at,
         updatedAt: t.updated_at,
+        updated_at: t.updated_at,
       },
-      messages: msgRows.map((m) => ({
-        id: m.id,
-        senderId: m.sender_id,
-        senderEmail: m.sender_email || "System",
-        senderRole: m.sender_role || "Admin",
-        senderType: m.sender_type,
-        message: m.message,
-        attachments: typeof m.attachments === "string" ? JSON.parse(m.attachments) : m.attachments,
-        createdAt: m.created_at,
-      })),
+      messages: msgRows.map((m) => {
+        let parsedAttachments = [];
+        if (typeof m.attachments === "string") {
+          try {
+            parsedAttachments = JSON.parse(m.attachments);
+          } catch {
+            parsedAttachments = [];
+          }
+        } else if (Array.isArray(m.attachments)) {
+          parsedAttachments = m.attachments;
+        }
+
+        const isAdmin = m.sender_type === "admin";
+        const senderName = isAdmin ? "BanglaQR Support Staff" : (t.company_name || "Merchant Representative");
+
+        return {
+          id: m.id,
+          senderId: m.sender_id,
+          sender_id: m.sender_id,
+          senderEmail: m.sender_email || "System",
+          sender_email: m.sender_email || "System",
+          senderRole: m.sender_role || (isAdmin ? "Admin" : "Merchant"),
+          sender_role: m.sender_role || (isAdmin ? "Admin" : "Merchant"),
+          senderType: m.sender_type,
+          sender_type: m.sender_type,
+          senderName,
+          sender_name: senderName,
+          message: m.message,
+          attachments: parsedAttachments,
+          createdAt: m.created_at,
+          created_at: m.created_at,
+        };
+      }),
     };
   },
 

@@ -1,5 +1,9 @@
 import { merchantRepository } from "./merchant.repository.js";
 import { secureStorage } from "../../config/storage.js";
+import { isDevVerificationBypass } from "../../config/env.js";
+import { db } from "../../config/db.js";
+import argon2 from "argon2";
+import crypto from "crypto";
 
 const REQUIRED_DOC_TYPES = [
   "NID_FRONT",
@@ -42,6 +46,8 @@ function calculateProgress(profile, contact, commercial, kyc, documents, verific
     (kyc?.bank_account_number || kyc?.accountNumber)
   );
 
+  const devBypassActive = isDevVerificationBypass();
+
   const steps = {
     company: Boolean(profile?.company_name || profile?.companyName),
     contact: Boolean(
@@ -54,7 +60,7 @@ function calculateProgress(profile, contact, commercial, kyc, documents, verific
     ),
     kyc: kycComplete,
     documents: requiredDocsComplete,
-    verification: Boolean(verification?.emailVerified && verification?.phoneVerified),
+    verification: Boolean((verification?.emailVerified && verification?.phoneVerified) || devBypassActive),
   };
 
   const completedCount = Object.values(steps).filter(Boolean).length;
@@ -510,11 +516,15 @@ export const merchantService = {
     if (!uploadedDocTypes.includes("TIN_CERTIFICATE")) missing.push("TIN Certificate document");
     if (!uploadedDocTypes.includes("CANCELLED_BANK_CHEQUE")) missing.push("Cancelled Bank Cheque document");
 
-    if (!verification?.emailVerified) {
-      missing.push("Email address verification");
-    }
-    if (!verification?.phoneVerified) {
-      missing.push("Phone number verification");
+    const devBypassActive = isDevVerificationBypass();
+
+    if (!devBypassActive) {
+      if (!verification?.emailVerified) {
+        missing.push("Email address verification");
+      }
+      if (!verification?.phoneVerified) {
+        missing.push("Phone number verification");
+      }
     }
 
     if (missing.length > 0) {
@@ -536,10 +546,24 @@ export const merchantService = {
       "submit_application",
       prevAccountStatus,
       "submitted",
-      { submittedAt: new Date().toISOString() }
+      {
+        submittedAt: new Date().toISOString(),
+        devVerificationBypass: devBypassActive,
+      }
     );
 
-    return {
+    // Insert persistent Admin notification
+    try {
+      const company = profile?.company_name || merchant.merchant_code;
+      await merchantRepository.createAdminNotification(
+        `New Merchant Application: ${company}`,
+        `Merchant ${company} (${merchant.merchant_code}) has submitted their onboarding & KYC documentation for verification.`,
+        "kyc",
+        `/admin/kyc`
+      );
+    } catch {}
+
+      return {
       success: true,
       message: "Merchant onboarding application submitted successfully. An administrator will review your submission.",
       accountStatus: "submitted",
@@ -547,5 +571,1082 @@ export const merchantService = {
       submittedAt: new Date().toISOString(),
       onboardingStep: 7,
     };
+  },
+
+  // ==========================================
+  // PART 3: GATEWAYS CATALOGUE & APPLY
+  // ==========================================
+  async getGateways(userId, filters = {}) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [gateways] = await db.execute("SELECT * FROM gateways WHERE status = 'active' ORDER BY name ASC");
+    const [applications] = await db.execute("SELECT gateway_id, status FROM merchant_gateway_applications WHERE merchant_id = ?", [merchant.id]);
+    const [services] = await db.execute("SELECT gateway_id, status FROM merchant_gateway_services WHERE merchant_id = ?", [merchant.id]);
+
+    const appMap = new Map();
+    applications.forEach((a) => appMap.set(a.gateway_id, a.status));
+
+    const serviceMap = new Map();
+    services.forEach((s) => serviceMap.set(s.gateway_id, s.status));
+
+    return gateways.map((g) => {
+      const appStatus = appMap.get(g.id) || null;
+      const svcStatus = serviceMap.get(g.id) || null;
+      return {
+        id: g.id,
+        name: g.name,
+        code: g.code,
+        logoUrl: g.logo_url,
+        description: g.description,
+        supportedMethods: typeof g.supported_methods === "string" ? JSON.parse(g.supported_methods) : (g.supported_methods || []),
+        serviceType: g.service_type || "Payment Gateway",
+        qrSupported: Boolean(g.qr_supported),
+        cardSupported: Boolean(g.card_supported),
+        mobileSupported: Boolean(g.mobile_supported),
+        apiSupported: Boolean(g.api_supported),
+        requiredDocuments: typeof g.required_documents === "string" ? JSON.parse(g.required_documents) : (g.required_documents || []),
+        serviceFee: Number(g.service_fee || 1.5),
+        setupFee: Number(g.setup_fee || 0),
+        status: g.status,
+        merchantApplicationStatus: appStatus,
+        merchantServiceStatus: svcStatus,
+        hasApplied: Boolean(appStatus),
+        isActivated: svcStatus === "active",
+        // Snake case aliases
+        gateway_name: g.name,
+        gateway_code: g.code,
+        gateway_logo: g.logo_url,
+        service_type: g.service_type || "Payment Gateway",
+        service_fee: Number(g.service_fee || 1.5),
+        setup_fee: Number(g.setup_fee || 0),
+      };
+    });
+  },
+
+  async getGatewayById(userId, gatewayId) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [rows] = await db.execute("SELECT * FROM gateways WHERE id = ? LIMIT 1", [gatewayId]);
+    if (!rows.length) {
+      const err = new Error("Gateway service not found");
+      err.statusCode = 404;
+      throw err;
+    }
+    const g = rows[0];
+
+    const [applications] = await db.execute(
+      "SELECT * FROM merchant_gateway_applications WHERE merchant_id = ? AND gateway_id = ? ORDER BY applied_at DESC LIMIT 1",
+      [merchant.id, gatewayId]
+    );
+
+    const [services] = await db.execute(
+      "SELECT * FROM merchant_gateway_services WHERE merchant_id = ? AND gateway_id = ? LIMIT 1",
+      [merchant.id, gatewayId]
+    );
+
+    return {
+      id: g.id,
+      name: g.name,
+      code: g.code,
+      logoUrl: g.logo_url,
+      description: g.description,
+      supportedMethods: typeof g.supported_methods === "string" ? JSON.parse(g.supported_methods) : (g.supported_methods || []),
+      serviceType: g.service_type || "Payment Gateway",
+      qrSupported: Boolean(g.qr_supported),
+      cardSupported: Boolean(g.card_supported),
+      mobileSupported: Boolean(g.mobile_supported),
+      apiSupported: Boolean(g.api_supported),
+      requiredDocuments: typeof g.required_documents === "string" ? JSON.parse(g.required_documents) : (g.required_documents || []),
+      serviceFee: Number(g.service_fee || 1.5),
+      setupFee: Number(g.setup_fee || 0),
+      status: g.status,
+      application: applications.length ? applications[0] : null,
+      service: services.length ? services[0] : null,
+      // Snake case aliases
+      gateway_name: g.name,
+      gateway_code: g.code,
+      gateway_logo: g.logo_url,
+      service_type: g.service_type || "Payment Gateway",
+      service_fee: Number(g.service_fee || 1.5),
+    };
+  },
+
+  async applyGateway(userId, gatewayId, payload = {}) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [gRows] = await db.execute("SELECT * FROM gateways WHERE id = ? AND status = 'active' LIMIT 1", [gatewayId]);
+    if (!gRows.length) {
+      const err = new Error("Selected gateway service is currently inactive or unavailable for application.");
+      err.statusCode = 400;
+      throw err;
+    }
+    const gateway = gRows[0];
+
+    // Check for existing applications
+    const [existing] = await db.execute(
+      "SELECT id, status FROM merchant_gateway_applications WHERE merchant_id = ? AND gateway_id = ? LIMIT 1",
+      [merchant.id, gatewayId]
+    );
+
+    if (existing.length > 0) {
+      const currentStatus = existing[0].status;
+      if (currentStatus === "approved") {
+        const err = new Error("You already have an approved application for this gateway service.");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (currentStatus === "applied" || currentStatus === "under_review") {
+        const err = new Error("You already have a pending application currently under review for this gateway.");
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    const [res] = await db.execute(
+      `INSERT INTO merchant_gateway_applications (merchant_id, gateway_id, gateway_name, gateway_code, logo_url, service_type, service_fee, status, applied_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'applied', NOW(), NOW(), NOW())`,
+      [merchant.id, gatewayId, gateway.name, gateway.code, gateway.logo_url || null, gateway.service_type || "Payment Gateway", gateway.service_fee || 1.5]
+    );
+
+    const applicationId = res.insertId;
+
+    // Record History
+    await merchantRepository.createHistory(
+      merchant.id,
+      "gateway_application",
+      "apply_gateway",
+      null,
+      "applied",
+      { gatewayId, gatewayName: gateway.name, applicationId }
+    );
+
+    // Create Admin Notification
+    const [prof] = await db.execute("SELECT company_name FROM merchant_profiles WHERE merchant_id = ? LIMIT 1", [merchant.id]);
+    const company = prof[0]?.company_name || merchant.merchant_code;
+
+    try {
+      await merchantRepository.createAdminNotification(
+        `New Gateway Application: ${gateway.name}`,
+        `Merchant ${company} (${merchant.merchant_code}) has applied for ${gateway.name} payment gateway service.`,
+        "gateway",
+        "/admin/gateways/applications"
+      );
+    } catch {}
+
+    return {
+      success: true,
+      message: `Your application for ${gateway.name} has been submitted successfully for compliance review.`,
+      applicationId,
+      gatewayName: gateway.name,
+      status: "applied",
+      appliedAt: new Date().toISOString(),
+    };
+  },
+
+  // ==========================================
+  // PART 4: APPLICATIONS
+  // ==========================================
+  async getApplications(userId, filters = {}) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const conditions = ["mga.merchant_id = ?"];
+    const params = [merchant.id];
+
+    if (filters.status && filters.status !== "all") {
+      conditions.push("mga.status = ?");
+      params.push(filters.status);
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await db.execute(
+      `
+        SELECT mga.*, 
+               COALESCE(g.name, mga.gateway_name, 'Deleted Gateway') AS gateway_name, 
+               COALESCE(g.code, mga.gateway_code, 'DELETED') AS gateway_code, 
+               COALESCE(g.logo_url, mga.logo_url) AS logo_url, 
+               COALESCE(g.service_type, mga.service_type, 'Payment Gateway') AS service_type, 
+               COALESCE(g.service_fee, mga.service_fee, 0) AS service_fee,
+               g.supported_methods, g.required_documents
+        FROM merchant_gateway_applications mga
+        LEFT JOIN gateways g ON mga.gateway_id = g.id
+        ${whereClause}
+        ORDER BY mga.applied_at DESC
+      `,
+      params
+    );
+
+    return rows.map((r) => ({
+      id: r.id,
+      applicationReference: `BQR-APP-${String(r.id).padStart(6, "0")}`,
+      gatewayId: r.gateway_id,
+      gatewayName: r.gateway_name,
+      gatewayCode: r.gateway_code,
+      logoUrl: r.logo_url,
+      serviceType: r.service_type,
+      serviceFee: Number(r.service_fee),
+      supportedMethods: typeof r.supported_methods === "string" ? JSON.parse(r.supported_methods) : (r.supported_methods || []),
+      requiredDocuments: typeof r.required_documents === "string" ? JSON.parse(r.required_documents) : (r.required_documents || []),
+      status: r.status,
+      reviewNote: r.review_note,
+      appliedAt: r.applied_at,
+      reviewedAt: r.reviewed_at,
+      updatedAt: r.updated_at,
+      // Snake case aliases
+      gateway_name: r.gateway_name,
+      gateway_code: r.gateway_code,
+      gateway_logo: r.logo_url,
+      service_type: r.service_type,
+      service_fee: Number(r.service_fee),
+      applied_at: r.applied_at,
+      reviewed_at: r.reviewed_at,
+      review_note: r.review_note,
+    }));
+  },
+
+  async getApplicationById(userId, applicationId) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [rows] = await db.execute(
+      `
+        SELECT mga.*, 
+               COALESCE(g.name, mga.gateway_name, 'Deleted Gateway') AS gateway_name, 
+               COALESCE(g.code, mga.gateway_code, 'DELETED') AS gateway_code, 
+               COALESCE(g.logo_url, mga.logo_url) AS logo_url, 
+               COALESCE(g.service_type, mga.service_type, 'Payment Gateway') AS service_type, 
+               COALESCE(g.service_fee, mga.service_fee, 0) AS service_fee,
+               g.supported_methods, g.required_documents, g.description
+        FROM merchant_gateway_applications mga
+        LEFT JOIN gateways g ON mga.gateway_id = g.id
+        WHERE mga.id = ? AND mga.merchant_id = ?
+        LIMIT 1
+      `,
+      [applicationId, merchant.id]
+    );
+
+    if (!rows.length) {
+      const err = new Error("Gateway application not found or unauthorized");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const r = rows[0];
+    return {
+      id: r.id,
+      applicationReference: `BQR-APP-${String(r.id).padStart(6, "0")}`,
+      gatewayId: r.gateway_id,
+      gatewayName: r.gateway_name,
+      gatewayCode: r.gateway_code,
+      logoUrl: r.logo_url,
+      description: r.description,
+      serviceType: r.service_type,
+      serviceFee: Number(r.service_fee),
+      supportedMethods: typeof r.supported_methods === "string" ? JSON.parse(r.supported_methods) : (r.supported_methods || []),
+      requiredDocuments: typeof r.required_documents === "string" ? JSON.parse(r.required_documents) : (r.required_documents || []),
+      status: r.status,
+      reviewNote: r.review_note,
+      appliedAt: r.applied_at,
+      reviewedAt: r.reviewed_at,
+      updatedAt: r.updated_at,
+      // Snake case aliases
+      gateway_name: r.gateway_name,
+      gateway_code: r.gateway_code,
+      gateway_logo: r.logo_url,
+      service_type: r.service_type,
+      service_fee: Number(r.service_fee),
+      applied_at: r.applied_at,
+      reviewed_at: r.reviewed_at,
+      review_note: r.review_note,
+    };
+  },
+
+  // ==========================================
+  // PART 5: MY SERVICES
+  // ==========================================
+  async getMyServices(userId, filters = {}) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const conditions = ["mgs.merchant_id = ?"];
+    const params = [merchant.id];
+
+    if (filters.status && filters.status !== "all") {
+      conditions.push("mgs.status = ?");
+      params.push(filters.status);
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await db.execute(
+      `
+        SELECT mgs.*, 
+               COALESCE(g.name, mgs.gateway_name, 'Deleted Gateway') AS gateway_name, 
+               COALESCE(g.code, mgs.gateway_code, 'DELETED') AS gateway_code, 
+               COALESCE(g.logo_url, mgs.logo_url) AS logo_url, 
+               COALESCE(g.service_fee, mgs.service_fee, 0) AS service_fee,
+               g.supported_methods, 
+               COALESCE(g.qr_supported, 1) AS qr_supported, 
+               COALESCE(g.card_supported, 0) AS card_supported, 
+               COALESCE(g.mobile_supported, 1) AS mobile_supported, 
+               COALESCE(g.api_supported, 1) AS api_supported
+        FROM merchant_gateway_services mgs
+        LEFT JOIN gateways g ON mgs.gateway_id = g.id
+        ${whereClause}
+        ORDER BY mgs.created_at DESC
+      `,
+      params
+    );
+
+    return rows.map((r) => {
+      const rawConfig = typeof r.configuration === "string" ? JSON.parse(r.configuration) : (r.configuration || {});
+      // Mask secret keys for security
+      const maskedConfig = { ...rawConfig };
+      if (maskedConfig.secretKey) {
+        maskedConfig.secretKey = "••••••••" + String(maskedConfig.secretKey).slice(-4);
+      }
+      if (maskedConfig.apiKey) {
+        maskedConfig.apiKey = "••••••••" + String(maskedConfig.apiKey).slice(-4);
+      }
+
+      return {
+        id: r.id,
+        gatewayId: r.gateway_id,
+        gatewayName: r.gateway_name,
+        gatewayCode: r.gateway_code,
+        logoUrl: r.logo_url,
+        serviceType: r.service_type,
+        serviceFee: Number(r.service_fee),
+        supportedMethods: typeof r.supported_methods === "string" ? JSON.parse(r.supported_methods) : (r.supported_methods || []),
+        qrSupported: Boolean(r.qr_supported),
+        cardSupported: Boolean(r.card_supported),
+        mobileSupported: Boolean(r.mobile_supported),
+        apiSupported: Boolean(r.api_supported),
+        status: r.status,
+        configuration: maskedConfig,
+        hasConfigured: Boolean(rawConfig.merchantId || rawConfig.storeId || rawConfig.apiKey),
+        activatedAt: r.activated_at,
+        createdAt: r.created_at,
+        // Snake case aliases
+        gateway_name: r.gateway_name,
+        gateway_code: r.gateway_code,
+        gateway_logo: r.logo_url,
+        service_type: r.service_type,
+        service_fee: Number(r.service_fee),
+        activated_at: r.activated_at,
+        created_at: r.created_at,
+      };
+    });
+  },
+
+  async getMyServiceById(userId, serviceId) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [rows] = await db.execute(
+      `
+        SELECT mgs.*, 
+               COALESCE(g.name, mgs.gateway_name, 'Deleted Gateway') AS gateway_name, 
+               COALESCE(g.code, mgs.gateway_code, 'DELETED') AS gateway_code, 
+               COALESCE(g.logo_url, mgs.logo_url) AS logo_url, 
+               COALESCE(g.service_fee, mgs.service_fee, 0) AS service_fee,
+               g.supported_methods, 
+               COALESCE(g.qr_supported, 1) AS qr_supported, 
+               COALESCE(g.card_supported, 0) AS card_supported, 
+               COALESCE(g.mobile_supported, 1) AS mobile_supported, 
+               COALESCE(g.api_supported, 1) AS api_supported, 
+               g.description
+        FROM merchant_gateway_services mgs
+        LEFT JOIN gateways g ON mgs.gateway_id = g.id
+        WHERE mgs.id = ? AND mgs.merchant_id = ?
+        LIMIT 1
+      `,
+      [serviceId, merchant.id]
+    );
+
+    if (!rows.length) {
+      const err = new Error("Merchant gateway service not found or unauthorized");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const r = rows[0];
+    const rawConfig = typeof r.configuration === "string" ? JSON.parse(r.configuration) : (r.configuration || {});
+
+    return {
+      id: r.id,
+      gatewayId: r.gateway_id,
+      gatewayName: r.gateway_name,
+      gatewayCode: r.gateway_code,
+      logoUrl: r.logo_url,
+      description: r.description,
+      serviceType: r.service_type,
+      serviceFee: Number(r.service_fee),
+      supportedMethods: typeof r.supported_methods === "string" ? JSON.parse(r.supported_methods) : (r.supported_methods || []),
+      qrSupported: Boolean(r.qr_supported),
+      cardSupported: Boolean(r.card_supported),
+      mobileSupported: Boolean(r.mobile_supported),
+      apiSupported: Boolean(r.api_supported),
+      status: r.status,
+      configuration: rawConfig,
+      activatedAt: r.activated_at,
+      createdAt: r.created_at,
+      // Snake case aliases
+      gateway_name: r.gateway_name,
+      gateway_code: r.gateway_code,
+      gateway_logo: r.logo_url,
+      service_type: r.service_type,
+      service_fee: Number(r.service_fee),
+      activated_at: r.activated_at,
+      created_at: r.created_at,
+    };
+  },
+
+  async updateServiceConfiguration(userId, serviceId, configPayload) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [rows] = await db.execute(
+      "SELECT * FROM merchant_gateway_services WHERE id = ? AND merchant_id = ? LIMIT 1",
+      [serviceId, merchant.id]
+    );
+
+    if (!rows.length) {
+      const err = new Error("Gateway service not found or unauthorized");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const service = rows[0];
+    const existingConfig = typeof service.configuration === "string" ? JSON.parse(service.configuration) : (service.configuration || {});
+
+    const updatedConfig = {
+      ...existingConfig,
+      merchantId: configPayload.merchantId ?? existingConfig.merchantId ?? "",
+      storeId: configPayload.storeId ?? existingConfig.storeId ?? "",
+      apiKey: configPayload.apiKey && !configPayload.apiKey.startsWith("••") ? configPayload.apiKey : existingConfig.apiKey ?? "",
+      secretKey: configPayload.secretKey && !configPayload.secretKey.startsWith("••") ? configPayload.secretKey : existingConfig.secretKey ?? "",
+      webhookUrl: configPayload.webhookUrl ?? existingConfig.webhookUrl ?? "",
+      callbackUrl: configPayload.callbackUrl ?? existingConfig.callbackUrl ?? "",
+      returnUrl: configPayload.returnUrl ?? existingConfig.returnUrl ?? "",
+      sandboxMode: configPayload.sandboxMode !== undefined ? Boolean(configPayload.sandboxMode) : (existingConfig.sandboxMode ?? true),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await db.execute(
+      "UPDATE merchant_gateway_services SET configuration = ?, updated_at = NOW() WHERE id = ?",
+      [JSON.stringify(updatedConfig), serviceId]
+    );
+
+    await merchantRepository.createHistory(
+      merchant.id,
+      "service_configuration",
+      "update_configuration",
+      service.status,
+      service.status,
+      { serviceId, gatewayId: service.gateway_id }
+    );
+
+    return {
+      success: true,
+      message: "Gateway credentials and configuration saved securely.",
+      serviceId,
+    };
+  },
+
+  // ==========================================
+  // PART 6: ADD-ONS
+  // ==========================================
+  async getAddons(userId, filters = {}) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [addons] = await db.execute("SELECT * FROM addons WHERE status = 'available' OR status = 'active' ORDER BY category ASC, name ASC");
+    const [merchantAddons] = await db.query(
+      `SELECT ma.*, 
+              o.id AS order_id, o.order_number, o.status AS order_status, o.amount AS order_amount,
+              p.id AS payment_id, p.payment_reference, p.status AS payment_status, p.checkout_url
+       FROM merchant_addons ma
+       LEFT JOIN addon_orders o ON (o.id = ma.order_id OR (o.merchant_id = ma.merchant_id AND o.addon_id = ma.addon_id AND o.status IN ('pending_payment', 'paid', 'active')))
+       LEFT JOIN addon_payments p ON (p.id = ma.payment_id OR (p.order_id = o.id AND p.status IN ('pending', 'processing', 'successful')))
+       WHERE ma.merchant_id = ?
+       ORDER BY ma.id DESC`,
+      [merchant.id]
+    );
+
+    const mAddonMap = new Map();
+    merchantAddons.forEach((ma) => {
+      if (!mAddonMap.has(ma.addon_id)) {
+        mAddonMap.set(ma.addon_id, ma);
+      } else {
+        const existing = mAddonMap.get(ma.addon_id);
+        if (existing.status !== "activated" && (ma.status === "activated" || ma.order_status === "pending_payment")) {
+          mAddonMap.set(ma.addon_id, ma);
+        }
+      }
+    });
+
+    return addons.map((a) => {
+      const ma = mAddonMap.get(a.id);
+      const isActivated = Boolean(
+        ma?.status === "activated" ||
+        ma?.status === "approved" ||
+        ma?.order_status === "active" ||
+        ma?.order_status === "paid"
+      );
+      const hasUnpaidOrder = Boolean(ma && ma.order_status === "pending_payment" && !isActivated);
+      const isUnderReview = Boolean(
+        ma && (ma.status === "under_review" || ma.order_status === "awaiting_approval") && !isActivated
+      );
+
+      const applicationStatus = ma ? ma.status : "available";
+      const orderStatus = ma?.order_status || (isActivated ? "paid" : null);
+      const paymentStatus = ma?.payment_status || (isActivated ? "successful" : null);
+      const subscriptionStatus = isActivated
+        ? "active"
+        : hasUnpaidOrder
+        ? "awaiting_payment"
+        : isUnderReview
+        ? "pending_approval"
+        : "inactive";
+
+      return {
+        id: a.id,
+        name: a.name,
+        code: a.code,
+        description: a.description,
+        category: a.category,
+        pricingType: a.pricing_type,
+        price: Number(a.price),
+        billingCycle: a.billing_cycle,
+        requirements: a.requirements,
+        status: a.status,
+        merchantStatus: ma ? ma.status : "available",
+        hasApplied: Boolean(ma),
+        isActivated,
+        hasUnpaidOrder,
+        isUnderReview,
+        orderId: ma?.order_id || null,
+        orderNumber: ma?.order_number || null,
+        orderStatus,
+        paymentId: ma?.payment_id || null,
+        paymentReference: ma?.payment_reference || null,
+        paymentStatus,
+        checkoutUrl: ma?.checkout_url || null,
+        applicationStatus,
+        subscriptionStatus,
+        // Snake case aliases
+        pricing_type: a.pricing_type,
+        billing_cycle: a.billing_cycle,
+        merchant_status: ma ? ma.status : "available",
+        has_applied: Boolean(ma),
+        is_activated: isActivated,
+        has_unpaid_order: hasUnpaidOrder,
+        is_under_review: isUnderReview,
+        order_id: ma?.order_id || null,
+        order_number: ma?.order_number || null,
+        order_status: orderStatus,
+        payment_id: ma?.payment_id || null,
+        payment_reference: ma?.payment_reference || null,
+        payment_status: paymentStatus,
+        checkout_url: ma?.checkout_url || null,
+        application_status: applicationStatus,
+        subscription_status: subscriptionStatus,
+      };
+    });
+  },
+
+  async applyAddon(userId, addonId, payload = {}) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [aRows] = await db.execute("SELECT * FROM addons WHERE id = ? AND status = 'available' LIMIT 1", [addonId]);
+    if (!aRows.length) {
+      const err = new Error("Selected add-on service is currently unavailable.");
+      err.statusCode = 400;
+      throw err;
+    }
+    const addon = aRows[0];
+
+    // Check if already applied
+    const [existing] = await db.execute(
+      "SELECT id, status FROM merchant_addons WHERE merchant_id = ? AND addon_id = ? LIMIT 1",
+      [merchant.id, addonId]
+    );
+
+    if (existing.length > 0) {
+      const currentStatus = existing[0].status;
+      if (currentStatus === "activated" || currentStatus === "approved") {
+        const err = new Error("This add-on is already active on your merchant account.");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (currentStatus === "applied" || currentStatus === "under_review") {
+        const err = new Error("You already have an active application under review for this add-on.");
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    const [res] = await db.execute(
+      `INSERT INTO merchant_addons (merchant_id, addon_id, addon_name, addon_code, logo_url, category, price, pricing_type, status, applied_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'applied', NOW(), NOW(), NOW())`,
+      [merchant.id, addonId, addon.name, addon.code, addon.logo_url || null, addon.category || "Operations", addon.price || 0, addon.pricing_type || "monthly"]
+    );
+
+    // History & Notification
+    await merchantRepository.createHistory(
+      merchant.id,
+      "addon_application",
+      "apply_addon",
+      null,
+      "applied",
+      { addonId, addonName: addon.name }
+    );
+
+    const [prof] = await db.execute("SELECT company_name FROM merchant_profiles WHERE merchant_id = ? LIMIT 1", [merchant.id]);
+    const company = prof[0]?.company_name || merchant.merchant_code;
+
+    try {
+      await merchantRepository.createAdminNotification(
+        `New Add-on Application: ${addon.name}`,
+        `Merchant ${company} (${merchant.merchant_code}) has applied for the ${addon.name} add-on service.`,
+        "gateway",
+        "/admin/addons"
+      );
+    } catch {}
+
+    return {
+      success: true,
+      message: `Your application for add-on '${addon.name}' has been submitted successfully.`,
+      addonId,
+      status: "applied",
+    };
+  },
+
+  // ==========================================
+  // PART 7: API & INTEGRATION
+  // ==========================================
+  async getIntegrationDetails(userId) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [profile] = await db.execute("SELECT company_name FROM merchant_profiles WHERE merchant_id = ? LIMIT 1", [merchant.id]);
+    const [activeServices] = await db.execute(
+      `SELECT mgs.*, 
+              COALESCE(g.name, mgs.gateway_name, 'Unknown Gateway') AS gateway_name, 
+              COALESCE(g.code, mgs.gateway_code, 'UNKNOWN') AS gateway_code
+       FROM merchant_gateway_services mgs
+       LEFT JOIN gateways g ON mgs.gateway_id = g.id
+       WHERE mgs.merchant_id = ? AND mgs.status = 'active'`,
+      [merchant.id]
+    );
+
+    const deterministicSandboxKey = `bqr_test_key_${Buffer.from(String(merchant.merchant_code)).toString("hex").slice(0, 16)}`;
+    const deterministicSandboxSecret = `bqr_test_sec_${Buffer.from(String(userId + merchant.id)).toString("hex").slice(0, 24)}`;
+
+    return {
+      merchantId: merchant.id,
+      merchantCode: merchant.merchant_code,
+      companyName: profile[0]?.company_name || merchant.merchant_code,
+      environment: "sandbox",
+      credentials: {
+        sandbox: {
+          apiKey: deterministicSandboxKey,
+          apiSecret: deterministicSandboxSecret,
+          merchantId: merchant.merchant_code,
+          apiBaseUrl: "https://sandbox.banglaqr.com/api/v1",
+          qrGenerateEndpoint: "/payments/banglaqr/generate",
+          statusCheckEndpoint: "/payments/banglaqr/status",
+          refundEndpoint: "/payments/banglaqr/refund",
+        },
+        live: {
+          apiKey: merchant.account_status === "approved" || merchant.account_status === "active" ? `bqr_live_${Buffer.from(String(merchant.merchant_code + "live")).toString("hex").slice(0, 16)}` : null,
+          apiSecret: merchant.account_status === "approved" || merchant.account_status === "active" ? `bqr_live_sec_${Buffer.from(String(merchant.merchant_code + "live")).toString("hex").slice(0, 24)}` : null,
+          apiBaseUrl: "https://api.banglaqr.com/api/v1",
+          isLiveEligible: merchant.account_status === "approved" || merchant.account_status === "active",
+        },
+      },
+      webhooks: {
+        registeredEndpoint: "https://yourdomain.com/webhooks/banglaqr",
+        signatureHeader: "X-BanglaQR-Signature",
+        ipWhitelist: ["103.145.118.0/24", "103.145.119.0/24"],
+      },
+      activeGateways: activeServices.map((s) => ({
+        id: s.id,
+        gatewayName: s.gateway_name,
+        gatewayCode: s.gateway_code,
+        serviceType: s.service_type,
+        activatedAt: s.activated_at,
+      })),
+      documentationGuides: [
+        {
+          title: "BanglaQR Static & Dynamic QR Spec",
+          type: "PDF / Online Guide",
+          link: "/docs/banglaqr-spec",
+        },
+        {
+          title: "Node.js SDK & Checkout Integration",
+          type: "NPM Package",
+          link: "https://github.com/banglaqr/nodejs-sdk",
+        },
+        {
+          title: "PHP & Laravel Interoperable Integration",
+          type: "Composer Package",
+          link: "https://github.com/banglaqr/php-sdk",
+        },
+      ],
+    };
+  },
+
+  // ==========================================
+  // NOTIFICATIONS
+  // ==========================================
+  async getNotifications(userId) {
+    const [rows] = await db.execute(
+      `SELECT id, title, message, type, link, is_read, created_at
+       FROM notifications
+       WHERE (recipient_type = 'merchant' AND recipient_id = ?) OR recipient_type = 'all'
+       ORDER BY created_at DESC LIMIT 50`,
+      [userId]
+    );
+
+    return rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      message: r.message,
+      type: r.type,
+      link: r.link || "/merchant/dashboard",
+      isRead: Boolean(r.is_read),
+      createdAt: r.created_at,
+    }));
+  },
+
+  async getUnreadNotificationCount(userId) {
+    const [rows] = await db.execute(
+      `SELECT COUNT(*) AS unread_count
+       FROM notifications
+       WHERE ((recipient_type = 'merchant' AND recipient_id = ?) OR recipient_type = 'all')
+         AND is_read = 0`,
+      [userId]
+    );
+    return { unreadCount: Number(rows[0]?.unread_count || 0) };
+  },
+
+  async markNotificationRead(userId, notifId) {
+    await db.execute(
+      `UPDATE notifications SET is_read = 1
+       WHERE id = ? AND ((recipient_type = 'merchant' AND recipient_id = ?) OR recipient_type = 'all')`,
+      [notifId, userId]
+    );
+    return { success: true };
+  },
+
+  async markAllNotificationsRead(userId) {
+    await db.execute(
+      `UPDATE notifications SET is_read = 1
+       WHERE ((recipient_type = 'merchant' AND recipient_id = ?) OR recipient_type = 'all') AND is_read = 0`,
+      [userId]
+    );
+    return { success: true };
+  },
+
+  // ==========================================
+  // SUPPORT TICKETS
+  // ==========================================
+  async getSupportTickets(userId, filters = {}) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const conditions = ["merchant_id = ?"];
+    const params = [merchant.id];
+
+    if (filters.status && filters.status !== "all") {
+      conditions.push("status = ?");
+      params.push(filters.status);
+    }
+
+    const [rows] = await db.execute(
+      `SELECT * FROM support_tickets WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`,
+      params
+    );
+
+    return rows.map((r) => ({
+      id: r.id,
+      ticketNumber: r.ticket_number,
+      ticket_number: r.ticket_number,
+      subject: r.subject,
+      priority: r.priority,
+      status: r.status,
+      category: r.category,
+      createdAt: r.created_at,
+      created_at: r.created_at,
+      updatedAt: r.updated_at,
+      updated_at: r.updated_at,
+    }));
+  },
+
+  async getSupportTicketById(userId, ticketId) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [rows] = await db.execute(
+      "SELECT * FROM support_tickets WHERE id = ? AND merchant_id = ? LIMIT 1",
+      [ticketId, merchant.id]
+    );
+    if (!rows.length) {
+      const err = new Error("Support ticket not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const ticket = rows[0];
+    const [messages] = await db.execute(
+      `SELECT id, ticket_id, sender_id, sender_type, message, attachments, created_at
+       FROM support_ticket_messages WHERE ticket_id = ? ORDER BY created_at ASC`,
+      [ticketId]
+    );
+
+    const mappedMessages = messages.map((m) => ({
+      id: m.id,
+      senderType: m.sender_type,
+      sender_type: m.sender_type,
+      message: m.message,
+      attachments: typeof m.attachments === "string" ? JSON.parse(m.attachments) : m.attachments,
+      createdAt: m.created_at,
+      created_at: m.created_at,
+    }));
+
+    return {
+      ...ticket,
+      ticketNumber: ticket.ticket_number,
+      ticket_number: ticket.ticket_number,
+      createdAt: ticket.created_at,
+      created_at: ticket.created_at,
+      updatedAt: ticket.updated_at,
+      updated_at: ticket.updated_at,
+      messages: mappedMessages,
+      replies: mappedMessages,
+    };
+  },
+
+  async createSupportTicket(userId, data) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const ticketNumber = `TKT-${Date.now().toString().slice(-6)}`;
+
+    const [res] = await db.execute(
+      `INSERT INTO support_tickets (ticket_number, merchant_id, user_id, subject, priority, status, category, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'open', ?, NOW(), NOW())`,
+      [
+        ticketNumber,
+        merchant.id,
+        userId,
+        data.subject,
+        data.priority || "medium",
+        data.category || "General Inquiry",
+      ]
+    );
+
+    const ticketId = res.insertId;
+
+    if (data.message) {
+      await db.execute(
+        `INSERT INTO support_ticket_messages (ticket_id, sender_id, sender_type, message, created_at)
+         VALUES (?, ?, 'merchant', ?, NOW())`,
+        [ticketId, userId, data.message]
+      );
+    }
+
+    return {
+      success: true,
+      message: "Support ticket submitted successfully. Support team will respond shortly.",
+      data: {
+        id: ticketId,
+        ticketId,
+        ticketNumber,
+      },
+    };
+  },
+
+  async replySupportTicket(userId, ticketId, data) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [rows] = await db.execute(
+      "SELECT id FROM support_tickets WHERE id = ? AND merchant_id = ? LIMIT 1",
+      [ticketId, merchant.id]
+    );
+    if (!rows.length) {
+      const err = new Error("Support ticket not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    await db.execute(
+      `INSERT INTO support_ticket_messages (ticket_id, sender_id, sender_type, message, created_at)
+       VALUES (?, ?, 'merchant', ?, NOW())`,
+      [ticketId, userId, data.message]
+    );
+
+    await db.execute(
+      `UPDATE support_tickets SET status = 'open', updated_at = NOW() WHERE id = ?`,
+      [ticketId]
+    );
+
+    return { success: true, message: "Reply added to ticket" };
+  },
+
+  // ==========================================
+  // INVOICES
+  // ==========================================
+  async getInvoices(userId, filters = {}) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const conditions = ["merchant_id = ?"];
+    const params = [merchant.id];
+
+    if (filters.status && filters.status !== "all") {
+      conditions.push("status = ?");
+      params.push(filters.status);
+    }
+
+    const [rows] = await db.execute(
+      `SELECT * FROM invoices WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`,
+      params
+    );
+
+    return rows.map((r) => ({
+      id: r.id,
+      invoiceNumber: r.invoice_number,
+      customerName: r.customer_name,
+      customerEmail: r.customer_email,
+      amount: Number(r.amount),
+      currency: r.currency || "BDT",
+      issueDate: r.issue_date,
+      dueDate: r.due_date,
+      status: r.status,
+      paymentReference: r.payment_reference,
+      items: typeof r.items === "string" ? JSON.parse(r.items) : (r.items || []),
+      createdAt: r.created_at,
+    }));
+  },
+
+  async getInvoiceById(userId, invoiceId) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [rows] = await db.execute(
+      "SELECT * FROM invoices WHERE id = ? AND merchant_id = ? LIMIT 1",
+      [invoiceId, merchant.id]
+    );
+    if (!rows.length) {
+      const err = new Error("Invoice not found");
+      err.statusCode = 404;
+      throw err;
+    }
+    const r = rows[0];
+    return {
+      id: r.id,
+      invoiceNumber: r.invoice_number,
+      customerName: r.customer_name,
+      customerEmail: r.customer_email,
+      amount: Number(r.amount),
+      currency: r.currency || "BDT",
+      issueDate: r.issue_date,
+      dueDate: r.due_date,
+      status: r.status,
+      paymentReference: r.payment_reference,
+      items: typeof r.items === "string" ? JSON.parse(r.items) : (r.items || []),
+      createdAt: r.created_at,
+    };
+  },
+
+  async createInvoice(userId, data) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
+
+    const custName = data.customerName || data.customer_name || "Customer";
+    const custEmail = data.customerEmail || data.customer_email || "customer@example.com";
+    const totalAmount = data.amount ?? data.total_amount ?? 0;
+    const currency = data.currency || "BDT";
+    const issueDate = data.issueDate || data.issue_date || new Date().toISOString().split("T")[0];
+    const dueDate = data.dueDate || data.due_date || new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
+    const status = data.status || "draft";
+    const itemsJson = JSON.stringify(data.items || []);
+
+    const [res] = await db.execute(
+      `INSERT INTO invoices (invoice_number, merchant_id, customer_name, customer_email, amount, currency, issue_date, due_date, status, items, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        invoiceNumber,
+        merchant.id,
+        custName,
+        custEmail,
+        totalAmount,
+        currency,
+        issueDate,
+        dueDate,
+        status,
+        itemsJson,
+      ]
+    );
+
+    return {
+      success: true,
+      message: "Invoice created successfully",
+      data: {
+        id: res.insertId,
+        invoiceId: res.insertId,
+        invoiceNumber,
+      },
+    };
+  },
+
+  async updateInvoice(userId, invoiceId, data) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    await db.execute(
+      `UPDATE invoices SET customer_name = ?, customer_email = ?, amount = ?, currency = ?, due_date = ?, status = ?, items = ?, updated_at = NOW()
+       WHERE id = ? AND merchant_id = ?`,
+      [
+        data.customerName,
+        data.customerEmail,
+        data.amount || 0,
+        data.currency || "BDT",
+        data.dueDate,
+        data.status,
+        JSON.stringify(data.items || []),
+        invoiceId,
+        merchant.id,
+      ]
+    );
+    return { success: true, message: "Invoice updated successfully" };
+  },
+
+  async deleteInvoice(userId, invoiceId) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    await db.execute("DELETE FROM invoices WHERE id = ? AND merchant_id = ?", [invoiceId, merchant.id]);
+    return { success: true, message: "Invoice deleted successfully" };
+  },
+
+  // ==========================================
+  // SETTINGS
+  // ==========================================
+  async getSettings(userId) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [user] = await db.execute("SELECT id, email, phone, status, two_factor_enabled FROM users WHERE id = ? LIMIT 1", [userId]);
+    const [profile] = await db.execute("SELECT * FROM merchant_profiles WHERE merchant_id = ? LIMIT 1", [merchant.id]);
+
+    return {
+      user: user[0] || {},
+      merchant: {
+        id: merchant.id,
+        merchantCode: merchant.merchant_code,
+        accountStatus: merchant.account_status,
+        kycStatus: merchant.kyc_status,
+      },
+      profile: profile[0] || {},
+    };
+  },
+
+  async changePassword(userId, { currentPassword, newPassword }) {
+    if (!newPassword || newPassword.length < 8) {
+      const err = new Error("New password must be at least 8 characters");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const [rows] = await db.execute("SELECT password_hash FROM users WHERE id = ? LIMIT 1", [userId]);
+    if (!rows.length) {
+      const err = new Error("User not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (currentPassword) {
+      const valid = await argon2.verify(rows[0].password_hash, currentPassword);
+      if (!valid) {
+        const err = new Error("Current password is incorrect");
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    const hash = await argon2.hash(newPassword);
+    await db.execute("UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?", [hash, userId]);
+
+    return { success: true, message: "Password updated successfully" };
   },
 };

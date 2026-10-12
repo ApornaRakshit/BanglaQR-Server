@@ -85,6 +85,11 @@ function sanitizeForPublic(content) {
     clean.footer.legalLinks = clean.footer.legalLinks.filter(l => l.isActive !== false);
   }
 
+  // 12. Filter contact services
+  if (clean.contact?.services) {
+    clean.contact.services = clean.contact.services.filter(s => typeof s === "string" || s.isActive !== false);
+  }
+
   return clean;
 }
 
@@ -100,6 +105,32 @@ export const cmsService = {
         isPublished: false,
         lastSavedAt: null,
         lastPublishedAt: null,
+      };
+    }
+    if (data.draftContent && !data.draftContent.contact) {
+      data.draftContent.contact = {
+        isActive: true,
+        badge: "GET IN TOUCH",
+        title: "Contact the Best Payment Partner in Bangladesh",
+        subtitle: "Ready to digitize your business? Call us today or fill out the form for a free consultation and software live demonstration.",
+        salesTitle: "Sales & Hotline",
+        salesPhone: "09602-111215  09697-428578",
+        salesHours: "Available Every Day 9:00 AM - 9:00 PM",
+        emailTitle: "Email Inquiry",
+        emailAddress: "info@csnbd.com",
+        emailSubtitle: "We reply within 24 business hours",
+        officeTitle: "Headquarters Office",
+        officeAddress: "Wakil Tower (8th Floor) Ta-131, Gulshan-1 Badda Link Road, Gulshan, Dhaka-1212",
+        formTitle: "Request a Free Demo / Quote",
+        formSubtitle: "Fill up the form below and our software experts will contact you promptly.",
+        submitButtonText: "Contact Us",
+        services: [
+          { id: "s1", name: "BanglaQR Payment Gateway", isActive: true, order: 1 },
+          { id: "s2", name: "Merchant POS System", isActive: true, order: 2 },
+          { id: "s3", name: "Dynamic QR Solution", isActive: true, order: 3 },
+          { id: "s4", name: "API & ERP Integration", isActive: true, order: 4 },
+          { id: "s5", name: "Custom Payment Software", isActive: true, order: 5 },
+        ],
       };
     }
     return data;

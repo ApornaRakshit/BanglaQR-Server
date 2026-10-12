@@ -9,6 +9,7 @@ import authRoutes from "./modules/auth/auth.routes.js";
 import merchantRoutes from "./modules/merchants/merchant.routes.js";
 import adminRoutes from "./modules/admin/admin.routes.js";
 import publicRoutes from "./modules/public/public.routes.js";
+import paymentsRoutes from "./modules/payments/payments.routes.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 
 import { env } from "./config/env.js";
@@ -17,12 +18,42 @@ const app = express();
 
 app.disable("x-powered-by");
 
+
+const allowedFrontendOrigins = new Set(env.frontendUrls);
+
 app.use(
   cors({
-    origin: env.frontendUrl,
+    origin(origin, callback) {
+      // Allow requests without a browser Origin header.
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedFrontendOrigins.has(origin)) {
+        return callback(null, true);
+      }
+
+      console.warn(`[CORS] Blocked origin: ${origin}`);
+      return callback(null, false);
+    },
+
     credentials: true,
+
+    methods: [
+      "GET",
+      "HEAD",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ],
+
+    maxAge: 86400,
+    optionsSuccessStatus: 204,
   })
 );
+
 
 app.use(
   helmet({
@@ -87,6 +118,11 @@ app.use(
 app.use(
   "/api/v1/public",
   publicRoutes
+);
+
+app.use(
+  "/api/v1/payments",
+  paymentsRoutes
 );
 
 app.use(errorHandler);

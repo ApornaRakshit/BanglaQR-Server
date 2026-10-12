@@ -1,3 +1,4 @@
+import fs from "fs";
 import { merchantService } from "./merchant.service.js";
 import {
   companySchema,
@@ -143,9 +144,23 @@ export const merchantController = {
     try {
       const docId = Number(req.params.id);
       const { filePath, mimeType, documentName } = await merchantService.getDocumentFile(req.user.id, docId);
-      res.setHeader("Content-Type", mimeType);
-      res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(documentName)}"`);
-      res.sendFile(filePath);
+
+      if (!fs.existsSync(filePath)) {
+        const err = new Error("Physical document file not found in secure storage");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      res.setHeader("Content-Type", mimeType || "application/octet-stream");
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${encodeURIComponent(documentName)}"`
+      );
+      res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+
+      const fileStream = fs.createReadStream(filePath);
+      fileStream.pipe(res);
     } catch (error) {
       next(error);
     }
@@ -166,6 +181,261 @@ export const merchantController = {
   async submitApplication(req, res, next) {
     try {
       const result = await merchantService.submitApplication(req.user.id);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // --- Gateways ---
+  async getGateways(req, res, next) {
+    try {
+      const data = await merchantService.getGateways(req.user.id, req.query);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getGatewayById(req, res, next) {
+    try {
+      const gatewayId = Number(req.params.gatewayId);
+      const data = await merchantService.getGatewayById(req.user.id, gatewayId);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async applyGateway(req, res, next) {
+    try {
+      const gatewayId = Number(req.params.gatewayId);
+      const result = await merchantService.applyGateway(req.user.id, gatewayId, req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // --- Applications ---
+  async getApplications(req, res, next) {
+    try {
+      const data = await merchantService.getApplications(req.user.id, req.query);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getApplicationById(req, res, next) {
+    try {
+      const id = Number(req.params.id);
+      const data = await merchantService.getApplicationById(req.user.id, id);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // --- Services ---
+  async getMyServices(req, res, next) {
+    try {
+      const data = await merchantService.getMyServices(req.user.id, req.query);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getMyServiceById(req, res, next) {
+    try {
+      const id = Number(req.params.id);
+      const data = await merchantService.getMyServiceById(req.user.id, id);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async updateServiceConfiguration(req, res, next) {
+    try {
+      const id = Number(req.params.id);
+      const result = await merchantService.updateServiceConfiguration(req.user.id, id, req.body);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // --- Addons ---
+  async getAddons(req, res, next) {
+    try {
+      const data = await merchantService.getAddons(req.user.id, req.query);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async applyAddon(req, res, next) {
+    try {
+      const addonId = Number(req.params.addonId);
+      const result = await merchantService.applyAddon(req.user.id, addonId, req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // --- Integration ---
+  async getIntegrationDetails(req, res, next) {
+    try {
+      const data = await merchantService.getIntegrationDetails(req.user.id);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // --- Notifications ---
+  async getNotifications(req, res, next) {
+    try {
+      const data = await merchantService.getNotifications(req.user.id);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getUnreadNotificationCount(req, res, next) {
+    try {
+      const data = await merchantService.getUnreadNotificationCount(req.user.id);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async markNotificationRead(req, res, next) {
+    try {
+      const id = Number(req.params.id);
+      const result = await merchantService.markNotificationRead(req.user.id, id);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async markAllNotificationsRead(req, res, next) {
+    try {
+      const result = await merchantService.markAllNotificationsRead(req.user.id);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // --- Support Tickets ---
+  async getSupportTickets(req, res, next) {
+    try {
+      const data = await merchantService.getSupportTickets(req.user.id, req.query);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getSupportTicketById(req, res, next) {
+    try {
+      const id = Number(req.params.id);
+      const data = await merchantService.getSupportTicketById(req.user.id, id);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async createSupportTicket(req, res, next) {
+    try {
+      const result = await merchantService.createSupportTicket(req.user.id, req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async replySupportTicket(req, res, next) {
+    try {
+      const id = Number(req.params.id);
+      const result = await merchantService.replySupportTicket(req.user.id, id, req.body);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // --- Invoices ---
+  async getInvoices(req, res, next) {
+    try {
+      const data = await merchantService.getInvoices(req.user.id, req.query);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getInvoiceById(req, res, next) {
+    try {
+      const id = Number(req.params.id);
+      const data = await merchantService.getInvoiceById(req.user.id, id);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async createInvoice(req, res, next) {
+    try {
+      const result = await merchantService.createInvoice(req.user.id, req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async updateInvoice(req, res, next) {
+    try {
+      const id = Number(req.params.id);
+      const result = await merchantService.updateInvoice(req.user.id, id, req.body);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async deleteInvoice(req, res, next) {
+    try {
+      const id = Number(req.params.id);
+      const result = await merchantService.deleteInvoice(req.user.id, id);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // --- Settings ---
+  async getSettings(req, res, next) {
+    try {
+      const data = await merchantService.getSettings(req.user.id);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async changePassword(req, res, next) {
+    try {
+      const result = await merchantService.changePassword(req.user.id, req.body);
       res.json(result);
     } catch (error) {
       next(error);

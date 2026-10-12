@@ -4,8 +4,8 @@ export const merchantRepository = {
   /**
    * Find or create merchant record for a given user ID
    */
-  async findOrCreateMerchantByUserId(userId) {
-    const [rows] = await db.execute(
+  async findOrCreateMerchantByUserId(userId, connectionOrDb = db) {
+    const [rows] = await connectionOrDb.execute(
       `SELECT * FROM merchants WHERE user_id = ? LIMIT 1`,
       [userId]
     );
@@ -17,13 +17,13 @@ export const merchantRepository = {
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const merchantCode = `BQR-M-${Date.now().toString().slice(-6)}${randomSuffix}`;
 
-    const [result] = await db.execute(
+    const [result] = await connectionOrDb.execute(
       `INSERT INTO merchants (user_id, merchant_code, account_status, kyc_status, onboarding_step)
        VALUES (?, ?, 'draft', 'pending', 1)`,
       [userId, merchantCode]
     );
 
-    const [newRows] = await db.execute(
+    const [newRows] = await connectionOrDb.execute(
       `SELECT * FROM merchants WHERE id = ? LIMIT 1`,
       [result.insertId]
     );
@@ -31,39 +31,39 @@ export const merchantRepository = {
     return newRows[0];
   },
 
-  async findMerchantByUserId(userId) {
-    const [rows] = await db.execute(
+  async findMerchantByUserId(userId, connectionOrDb = db) {
+    const [rows] = await connectionOrDb.execute(
       `SELECT * FROM merchants WHERE user_id = ? LIMIT 1`,
       [userId]
     );
     return rows[0] || null;
   },
 
-  async findMerchantById(merchantId) {
-    const [rows] = await db.execute(
+  async findMerchantById(merchantId, connectionOrDb = db) {
+    const [rows] = await connectionOrDb.execute(
       `SELECT * FROM merchants WHERE id = ? LIMIT 1`,
       [merchantId]
     );
     return rows[0] || null;
   },
 
-  async updateMerchantStep(merchantId, step) {
-    await db.execute(
+  async updateMerchantStep(merchantId, step, connectionOrDb = db) {
+    await connectionOrDb.execute(
       `UPDATE merchants SET onboarding_step = GREATEST(onboarding_step, ?) WHERE id = ?`,
       [step, merchantId]
     );
   },
 
-  async updateMerchantStatus(merchantId, accountStatus, kycStatus, submitted = false) {
+  async updateMerchantStatus(merchantId, accountStatus, kycStatus, submitted = false, connectionOrDb = db) {
     if (submitted) {
-      await db.execute(
+      await connectionOrDb.execute(
         `UPDATE merchants
          SET account_status = ?, kyc_status = ?, submitted_at = NOW(), onboarding_step = 7
          WHERE id = ?`,
         [accountStatus, kycStatus, merchantId]
       );
     } else {
-      await db.execute(
+      await connectionOrDb.execute(
         `UPDATE merchants SET account_status = ?, kyc_status = ? WHERE id = ?`,
         [accountStatus, kycStatus, merchantId]
       );
@@ -71,49 +71,49 @@ export const merchantRepository = {
   },
 
   // --- Profile ---
-  async getProfile(merchantId) {
-    const [rows] = await db.execute(
+  async getProfile(merchantId, connectionOrDb = db) {
+    const [rows] = await connectionOrDb.execute(
       `SELECT * FROM merchant_profiles WHERE merchant_id = ? LIMIT 1`,
       [merchantId]
     );
     return rows[0] || null;
   },
 
-  async upsertProfile(merchantId, data) {
-    const existing = await this.getProfile(merchantId);
+  async upsertProfile(merchantId, data, connectionOrDb = db) {
+    const existing = await this.getProfile(merchantId, connectionOrDb);
     if (existing) {
-      await db.execute(
+      await connectionOrDb.execute(
         `UPDATE merchant_profiles
          SET company_name = ?, business_type = ?, industry = ?, website = ?,
              address = ?, city = ?, state = ?, postal_code = ?, country = ?
          WHERE merchant_id = ?`,
         [
-          data.companyName,
-          data.businessType || null,
+          data.companyName || data.company_name || "My Business",
+          data.businessType || data.business_type || null,
           data.industry || null,
           data.website || null,
           data.address || null,
           data.city || null,
           data.state || null,
-          data.postalCode || null,
+          data.postalCode || data.postal_code || null,
           data.country || "Bangladesh",
           merchantId,
         ]
       );
     } else {
-      await db.execute(
+      await connectionOrDb.execute(
         `INSERT INTO merchant_profiles (merchant_id, company_name, business_type, industry, website, address, city, state, postal_code, country)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           merchantId,
-          data.companyName,
-          data.businessType || null,
+          data.companyName || data.company_name || "My Business",
+          data.businessType || data.business_type || null,
           data.industry || null,
           data.website || null,
           data.address || null,
           data.city || null,
           data.state || null,
-          data.postalCode || null,
+          data.postalCode || data.postal_code || null,
           data.country || "Bangladesh",
         ]
       );
@@ -121,25 +121,25 @@ export const merchantRepository = {
   },
 
   // --- Contact ---
-  async getContact(merchantId) {
-    const [rows] = await db.execute(
+  async getContact(merchantId, connectionOrDb = db) {
+    const [rows] = await connectionOrDb.execute(
       `SELECT * FROM merchant_contacts WHERE merchant_id = ? LIMIT 1`,
       [merchantId]
     );
     return rows[0] || null;
   },
 
-  async upsertContact(merchantId, data) {
-    const existing = await this.getContact(merchantId);
+  async upsertContact(merchantId, data, connectionOrDb = db) {
+    const existing = await this.getContact(merchantId, connectionOrDb);
     if (existing) {
-      await db.execute(
+      await connectionOrDb.execute(
         `UPDATE merchant_contacts
          SET name = ?, phone = ?, email = ?, designation = ?
          WHERE merchant_id = ?`,
         [data.name, data.phone, data.email, data.designation || null, merchantId]
       );
     } else {
-      await db.execute(
+      await connectionOrDb.execute(
         `INSERT INTO merchant_contacts (merchant_id, name, phone, email, designation)
          VALUES (?, ?, ?, ?, ?)`,
         [merchantId, data.name, data.phone, data.email, data.designation || null]
@@ -423,5 +423,14 @@ export const merchantRepository = {
       phoneVerified: Boolean(u.phone_verified_at),
       status: u.status,
     };
+  },
+
+  // --- Notification ---
+  async createAdminNotification(title, message, type = "system", link = "/admin/kyc") {
+    await db.execute(
+      `INSERT INTO notifications (recipient_type, recipient_id, title, message, type, link, is_read, created_at)
+       VALUES ('admin', NULL, ?, ?, ?, ?, 0, NOW())`,
+      [title, message, type, link]
+    );
   },
 };

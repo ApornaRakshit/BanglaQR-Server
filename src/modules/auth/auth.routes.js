@@ -4,9 +4,13 @@ import {
   register,
   verify,
   resend,
+  verificationStatus,
   login,
   me,
   logout,
+  forgotPassword,
+  verifyResetTokenController,
+  resetPasswordController,
 } from "./auth.controller.js";
 
 import { requireAuth } from "../../middlewares/auth.js";
@@ -18,6 +22,14 @@ router.post("/register", register);
 router.post("/verify", verify);
 
 router.post("/resend-otp", resend);
+
+router.get("/verification-status", verificationStatus);
+
+router.post("/forgot-password", forgotPassword);
+
+router.get("/verify-reset-token", verifyResetTokenController);
+
+router.post("/reset-password", resetPasswordController);
 
 router.post("/login", login);
 
