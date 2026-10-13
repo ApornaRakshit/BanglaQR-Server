@@ -380,7 +380,7 @@ async function run() {
           supportEmail: "compliance@banglaqr.com",
           supportPhone: "+880 9612 000 000",
           maintenanceMode: false,
-          allowedOrigins: ["http://localhost:5173", "http://localhost:3000"],
+          allowedOrigins: ["http://localhost:5173", "http://localhost:3000", "https://banglaqr.online", "https://www.banglaqr.online"],
         }),
         category: "general"
       },

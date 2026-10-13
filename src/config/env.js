@@ -88,6 +88,8 @@ const developmentOrigins =
   nodeEnv === "production"
     ? []
     : [
+      "https://banglaqr.online",
+      "https://www.banglaqr.online",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
@@ -162,9 +164,14 @@ export const env = {
     authPath: process.env.DGEPAY_AUTH_PATH || "/payment_gateway/authenticate",
     initiatePath: process.env.DGEPAY_INITIATE_PATH || "/payment_gateway/initiate_payment",
     verifyPath: process.env.DGEPAY_VERIFY_PATH || "/payment_gateway/check_transaction_status",
-    redirectUrl: process.env.DGEPAY_REDIRECT_URL || "http://localhost:5000/api/v1/payments/dgepay/callback",
-    callbackUrl: process.env.DGEPAY_CALLBACK_URL || "http://localhost:5000/api/v1/payments/dgepay/callback",
-    frontendResultUrl: process.env.DGEPAY_FRONTEND_RESULT_URL || "http://localhost:5173/merchant/addons?payment=result",
+    // redirectUrl: process.env.DGEPAY_REDIRECT_URL || "http://localhost:5000/api/v1/payments/dgepay/callback",
+    // callbackUrl: process.env.DGEPAY_CALLBACK_URL || "http://localhost:5000/api/v1/payments/dgepay/callback",
+    // frontendResultUrl: process.env.DGEPAY_FRONTEND_RESULT_URL || "http://localhost:5173/merchant/addons?payment=result",
+    
+    redirectUrl: process.env.DGEPAY_REDIRECT_URL || "https://api.banglaqr.online/api/v1/payments/dgepay/callback",
+    callbackUrl: process.env.DGEPAY_CALLBACK_URL || "https://api.banglaqr.online/api/v1/payments/dgepay/callback",
+    frontendResultUrl: process.env.DGEPAY_FRONTEND_RESULT_URL || "https://banglaqr.online/merchant/addons?payment=result",
+    
     debug: process.env.DGEPAY_DEBUG === "true",
   },
 };
