@@ -219,8 +219,15 @@ export const merchantRepository = {
     const nidVal = data.nidNumber || data.nid_number || null;
     const nidIssue = data.nidIssueDate || data.nid_issue_date || null;
     const nidExpiry = data.nidExpiryDate || data.nid_expiry_date || null;
+    const instId = data.institutionId || data.institution_id || null;
+    const branchId = data.branchId || data.branch_id || null;
     const bankName = data.bankName || data.bank_name || null;
     const branchName = data.branchName || data.branch_name || null;
+    const branchCode = data.branchCode || data.branch_code || null;
+    const division = data.division || null;
+    const district = data.district || null;
+    const upazila = data.upazila || null;
+    const branchAddress = data.branchAddress || data.branch_address || null;
     const accHolder = data.accountHolderName || data.bank_account_name || null;
     const accNumber = data.accountNumber || data.bank_account_number || null;
     const routingVal = data.routingNumber || data.routing_number || null;
@@ -232,8 +239,9 @@ export const merchantRepository = {
          SET legal_business_name = ?, business_entity_type = ?, trade_license_number = ?,
              registration_number = ?, tin = ?, bin = ?, authorized_person_name = ?,
              designation = ?, nid_number = ?, nid_issue_date = ?, nid_expiry_date = ?,
-             bank_name = ?, branch_name = ?, bank_account_name = ?, bank_account_number = ?,
-             routing_number = ?, account_type = ?
+             institution_id = ?, branch_id = ?, bank_name = ?, branch_name = ?,
+             branch_code = ?, division = ?, district = ?, upazila = ?, branch_address = ?,
+             bank_account_name = ?, bank_account_number = ?, routing_number = ?, account_type = ?
          WHERE merchant_id = ?`,
         [
           legalName,
@@ -247,8 +255,15 @@ export const merchantRepository = {
           nidVal,
           nidIssue,
           nidExpiry,
+          instId,
+          branchId,
           bankName,
           branchName,
+          branchCode,
+          division,
+          district,
+          upazila,
+          branchAddress,
           accHolder,
           accNumber,
           routingVal,
@@ -261,9 +276,10 @@ export const merchantRepository = {
         `INSERT INTO merchant_kyc
          (merchant_id, legal_business_name, business_entity_type, trade_license_number,
           registration_number, tin, bin, authorized_person_name, designation, nid_number,
-          nid_issue_date, nid_expiry_date, bank_name, branch_name, bank_account_name,
+          nid_issue_date, nid_expiry_date, institution_id, branch_id, bank_name, branch_name,
+          branch_code, division, district, upazila, branch_address, bank_account_name,
           bank_account_number, routing_number, account_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           merchantId,
           legalName,
@@ -277,8 +293,15 @@ export const merchantRepository = {
           nidVal,
           nidIssue,
           nidExpiry,
+          instId,
+          branchId,
           bankName,
           branchName,
+          branchCode,
+          division,
+          district,
+          upazila,
+          branchAddress,
           accHolder,
           accNumber,
           routingVal,
@@ -432,5 +455,50 @@ export const merchantRepository = {
        VALUES ('admin', NULL, ?, ?, ?, ?, 0, NOW())`,
       [title, message, type, link]
     );
+  },
+
+  // --- Banking Institution KYC Requirements (strictly stripped of admin_notes) ---
+  async getInstitutionKycRequirements(institutionId, serviceId = null) {
+    const conditions = ["ikr.institution_id = ?", "ikr.status = 'active'"];
+    const params = [Number(institutionId)];
+
+    if (serviceId && !isNaN(Number(serviceId)) && Number(serviceId) > 0) {
+      conditions.push("(ikr.applicable_service_id = ? OR ikr.applicable_service_id IS NULL)");
+      params.push(Number(serviceId));
+    }
+
+    // STRICT PRIVACY: Note that admin_notes and review_instructions are NOT selected!
+    const [rows] = await db.query(
+      `
+      SELECT
+        ikr.id,
+        ikr.institution_id,
+        ikr.applicable_service_id,
+        ikr.name,
+        ikr.requirement_code,
+        ikr.requirement_category,
+        ikr.requirement_type,
+        ikr.applicable_business_types,
+        ikr.document_type,
+        ikr.description,
+        ikr.instructions,
+        ikr.allowed_extensions,
+        ikr.max_file_size_mb,
+        ikr.max_pdf_pages,
+        ikr.document_sides,
+        ikr.is_mandatory,
+        ikr.sample_document_url,
+        ikr.sample_document_urls,
+        ikr.display_order,
+        g.name AS service_name
+      FROM institution_kyc_requirements ikr
+      LEFT JOIN gateways g ON g.id = ikr.applicable_service_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY ikr.display_order ASC, ikr.id ASC
+      `,
+      params
+    );
+
+    return rows;
   },
 };

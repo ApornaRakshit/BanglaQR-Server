@@ -309,5 +309,152 @@ Security Notice: If you did not request this, please ignore this email.
       throw error;
     }
   },
+
+  async sendInstitutionInvitationEmail({
+    to,
+    name,
+    institutionName,
+    roleName,
+    invitationUrl,
+    expiresDays = 7,
+  }) {
+    const isEmailConfigured = this.isConfigured();
+
+    if (!isEmailConfigured) {
+      if (env.nodeEnv === "development") {
+        console.log(`\n==================================================`);
+        console.log(`[EmailService:DEV] SMTP is not configured in .env.`);
+        console.log(`Invitation for: ${to} (${name || "Bank Administrator"})`);
+        console.log(`Institution: ${institutionName} | Role: ${roleName}`);
+        console.log(`Activation Link: ${invitationUrl}`);
+        console.log(`==================================================\n`);
+        return {
+          success: false,
+          delivered: false,
+          devSimulated: true,
+          message: "SMTP not configured in .env - activation link generated for development",
+        };
+      }
+
+      return {
+        success: false,
+        delivered: false,
+        message: "Email service unconfigured. Unable to send invitation email.",
+      };
+    }
+
+    const mailer = getTransporter();
+    const fromAddress =
+      process.env.SMTP_FROM || `"BanglaQR Platform Security" <noreply@banglaqr.com>`;
+
+    const roleLabel =
+      roleName === "bank_admin"
+        ? "Bank Administrator (Full Control)"
+        : roleName === "bank_reviewer"
+        ? "Bank KYC Reviewer"
+        : "Bank Operations Officer";
+
+    const subject = `You are invited to join ${institutionName} on BanglaQR`;
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invitation to ${institutionName}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 0; color: #0f172a; }
+    .container { max-width: 560px; margin: 30px auto; background: #ffffff; border-radius: 20px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05); }
+    .header { background: linear-gradient(135deg, #008744 0%, #005a2d 100%); padding: 32px 24px; text-align: center; color: #ffffff; }
+    .header h1 { margin: 0; font-size: 24px; font-weight: 900; letter-spacing: -0.5px; }
+    .header p { margin: 6px 0 0; font-size: 13px; color: #d1fae5; font-weight: 500; }
+    .content { padding: 36px 32px; text-align: left; }
+    .title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0 0 12px; }
+    .subtitle { font-size: 14px; color: #475569; line-height: 1.6; margin: 0 0 24px; }
+    .role-badge { display: inline-block; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 6px 12px; color: #065f46; font-size: 12px; font-weight: 700; margin-bottom: 24px; }
+    .btn-container { text-align: center; margin: 28px 0; }
+    .btn { display: inline-block; background-color: #008744; color: #ffffff !important; font-weight: 800; font-size: 15px; padding: 14px 32px; text-decoration: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0, 135, 68, 0.25); }
+    .btn:hover { background-color: #007038; }
+    .link-fallback { background: #f1f5f9; padding: 12px 16px; border-radius: 10px; font-size: 11px; word-break: break-all; color: #475569; margin: 24px 0; }
+    .expiry { font-size: 12px; color: #e11d48; font-weight: 700; text-align: center; margin-bottom: 20px; }
+    .notice { background: #f8fafc; border-left: 3px solid #008744; padding: 12px 16px; border-radius: 4px; font-size: 12px; color: #475569; line-height: 1.5; }
+    .footer { background: #f8fafc; border-top: 1px solid #f1f5f9; padding: 20px 24px; text-align: center; font-size: 12px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>BanglaQR Institution Portal</h1>
+      <p>Secure Banking & Merchant Operation Service</p>
+    </div>
+    <div class="content">
+      <h2 class="title">Hello ${name ? name : "Administrator"},</h2>
+      <p class="subtitle">
+        You have been invited by the BanglaQR Platform Administrator to join <strong>${institutionName}</strong> as an authorized staff member.
+      </p>
+      <div>
+        <span class="role-badge">Assigned Role: ${roleLabel}</span>
+      </div>
+      <p class="subtitle">
+        Please click the button below to set up your password and activate your account access to the Institution Portal.
+      </p>
+      <div class="btn-container">
+        <a href="${invitationUrl}" target="_blank" class="btn">Set Password & Activate Account</a>
+      </div>
+      <p class="expiry">⏱ Link expires in ${expiresDays} days (Single-use)</p>
+      <div class="link-fallback">
+        If the button does not work, copy and paste this secure link into your browser:<br/>
+        <a href="${invitationUrl}" style="color: #008744;">${invitationUrl}</a>
+      </div>
+      <div class="notice">
+        <strong>Security Tip:</strong> Never share this invitation link with anyone. Once you set your password, this link will automatically expire.
+      </div>
+    </div>
+    <div class="footer">
+      <p>&copy; ${new Date().getFullYear()} BanglaQR Digital Payment Platform. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const textContent = `
+Hello ${name ? name : "Administrator"},
+
+You have been invited by the BanglaQR Platform Administrator to join ${institutionName} as ${roleLabel}.
+
+Set up your secure password and activate your staff access here:
+${invitationUrl}
+
+This link is valid for ${expiresDays} days and can only be used once.
+
+© ${new Date().getFullYear()} BanglaQR Digital Payment Platform.
+    `.trim();
+
+    try {
+      const info = await mailer.sendMail({
+        from: fromAddress,
+        to,
+        subject,
+        text: textContent,
+        html: htmlContent,
+      });
+
+      return {
+        success: true,
+        delivered: true,
+        messageId: info.messageId,
+      };
+    } catch (err) {
+      console.error("[EmailService Error: Invitation]", err.message);
+      return {
+        success: false,
+        delivered: false,
+        error: err.message,
+        message: "Failed to deliver email through SMTP server.",
+      };
+    }
+  },
 };
 

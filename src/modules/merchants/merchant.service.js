@@ -2,6 +2,7 @@ import { merchantRepository } from "./merchant.repository.js";
 import { secureStorage } from "../../config/storage.js";
 import { isDevVerificationBypass } from "../../config/env.js";
 import { db } from "../../config/db.js";
+import { adminInstitutionsRepository } from "../admin/institutions/admin.institutions.repository.js";
 import argon2 from "argon2";
 import crypto from "crypto";
 
@@ -90,14 +91,26 @@ export const merchantService = {
 
   async getMerchantMe(userId) {
     const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
-    const [profile, contact, commercial, kyc, documents, verification] = await Promise.all([
+    const [profile, contact, commercial, kyc, documents, verification, fieldIssues] = await Promise.all([
       merchantRepository.getProfile(merchant.id),
       merchantRepository.getContact(merchant.id),
       merchantRepository.getCommercial(merchant.id),
       merchantRepository.getKyc(merchant.id),
       merchantRepository.getDocuments(merchant.id),
       merchantRepository.getUserVerification(userId),
+      db.query(
+        `SELECT kfi.*, i.name AS institution_name, ib.branch_name
+         FROM kyc_field_issues kfi
+         LEFT JOIN institutions i ON i.id = kfi.institution_id
+         LEFT JOIN merchant_gateway_applications mga ON mga.merchant_id = kfi.merchant_id AND mga.institution_id = kfi.institution_id
+         LEFT JOIN institution_branches ib ON ib.id = mga.branch_id
+         WHERE kfi.merchant_id = ?
+         ORDER BY kfi.created_at DESC`,
+        [merchant.id]
+      ).then(([rows]) => rows).catch(() => []),
     ]);
+
+    const openIssues = (fieldIssues || []).filter((i) => i.status === "open");
 
     const { steps, percentage, canSubmit, docChecklist } = calculateProgress(
       profile,
@@ -168,8 +181,15 @@ export const merchantService = {
             nidNumber: kyc.nid_number || "",
             nidIssueDate: kyc.nid_issue_date ? kyc.nid_issue_date.toString().split("T")[0] : "",
             nidExpiryDate: kyc.nid_expiry_date ? kyc.nid_expiry_date.toString().split("T")[0] : "",
+            institutionId: kyc.institution_id || null,
+            branchId: kyc.branch_id || null,
             bankName: kyc.bank_name || "",
             branchName: kyc.branch_name || "",
+            branchCode: kyc.branch_code || "",
+            division: kyc.division || "",
+            district: kyc.district || "",
+            upazila: kyc.upazila || "",
+            branchAddress: kyc.branch_address || "",
             accountHolderName: kyc.bank_account_name || "",
             accountNumber: kyc.bank_account_number || "",
             routingNumber: kyc.routing_number || "",
@@ -202,7 +222,23 @@ export const merchantService = {
         currentStep: merchant.onboarding_step,
         accountStatus: merchant.account_status,
         kycStatus: merchant.kyc_status,
+        openKycIssuesCount: openIssues.length,
       },
+      kycFieldIssues: (fieldIssues || []).map((fi) => ({
+        id: fi.id,
+        kycId: fi.kyc_id,
+        institutionId: fi.institution_id,
+        institutionName: fi.institution_name,
+        branchName: fi.branch_name,
+        fieldKey: fi.field_key,
+        issueType: fi.issue_type,
+        issueReason: fi.issue_reason,
+        status: fi.status,
+        resolutionNote: fi.resolution_note,
+        createdAt: fi.created_at,
+        updatedAt: fi.updated_at,
+      })),
+      isApproved: merchant.account_status === "approved" || merchant.account_status === "active",
     };
   },
 
@@ -266,8 +302,15 @@ export const merchantService = {
       nidNumber: kyc.nid_number || "",
       nidIssueDate: kyc.nid_issue_date ? kyc.nid_issue_date.toString().split("T")[0] : "",
       nidExpiryDate: kyc.nid_expiry_date ? kyc.nid_expiry_date.toString().split("T")[0] : "",
+      institutionId: kyc.institution_id || null,
+      branchId: kyc.branch_id || null,
       bankName: kyc.bank_name || "",
       branchName: kyc.branch_name || "",
+      branchCode: kyc.branch_code || "",
+      division: kyc.division || "",
+      district: kyc.district || "",
+      upazila: kyc.upazila || "",
+      branchAddress: kyc.branch_address || "",
       accountHolderName: kyc.bank_account_name || "",
       accountNumber: kyc.bank_account_number || "",
       routingNumber: kyc.routing_number || "",
@@ -277,7 +320,36 @@ export const merchantService = {
 
   async updateKyc(userId, data) {
     const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
-    await merchantRepository.upsertKyc(merchant.id, data);
+
+    const payload = { ...data };
+
+    // If branchId is supplied, auto-sync verified branch data from database
+    if (payload.branchId) {
+      const [branches] = await db.query(
+        "SELECT * FROM institution_branches WHERE id = ? AND status = 'active' AND is_archived = 0 LIMIT 1",
+        [payload.branchId]
+      );
+      if (branches.length > 0) {
+        const branch = branches[0];
+        payload.branchName = branch.branch_name;
+        payload.branchCode = branch.branch_code;
+        payload.routingNumber = branch.routing_number || payload.routingNumber;
+        payload.division = branch.division;
+        payload.district = branch.district;
+        payload.upazila = branch.upazila;
+        payload.branchAddress = branch.address;
+        payload.institutionId = branch.institution_id;
+      }
+    }
+
+    if (payload.institutionId && !payload.bankName) {
+      const [insts] = await db.query("SELECT name FROM institutions WHERE id = ? LIMIT 1", [payload.institutionId]);
+      if (insts.length > 0) {
+        payload.bankName = insts[0].name;
+      }
+    }
+
+    await merchantRepository.upsertKyc(merchant.id, payload);
     await merchantRepository.updateMerchantStep(merchant.id, 5);
     await merchantRepository.createHistory(
       merchant.id,
@@ -516,16 +588,7 @@ export const merchantService = {
     if (!uploadedDocTypes.includes("TIN_CERTIFICATE")) missing.push("TIN Certificate document");
     if (!uploadedDocTypes.includes("CANCELLED_BANK_CHEQUE")) missing.push("Cancelled Bank Cheque document");
 
-    const devBypassActive = isDevVerificationBypass();
-
-    if (!devBypassActive) {
-      if (!verification?.emailVerified) {
-        missing.push("Email address verification");
-      }
-      if (!verification?.phoneVerified) {
-        missing.push("Phone number verification");
-      }
-    }
+    const devBypassActive = true; // Email and phone verification are optional per current requirement
 
     if (missing.length > 0) {
       const error = new Error(
@@ -552,7 +615,7 @@ export const merchantService = {
       }
     );
 
-    // Insert persistent Admin notification
+    // Insert persistent Admin notification & Bank Partner notification
     try {
       const company = profile?.company_name || merchant.merchant_code;
       await merchantRepository.createAdminNotification(
@@ -561,15 +624,169 @@ export const merchantService = {
         "kyc",
         `/admin/kyc`
       );
-    } catch {}
 
-      return {
+      // If merchant selected an Institution Bank in KYC (or existing applications), notify the Bank
+      const bankInstId = kyc?.institution_id || null;
+      if (bankInstId) {
+        // Ensure an entry exists in merchant_gateway_applications for this institution
+        const [existingApps] = await db.query(
+          `SELECT id FROM merchant_gateway_applications WHERE merchant_id = ? AND institution_id = ? LIMIT 1`,
+          [merchant.id, Number(bankInstId)]
+        );
+
+        if (existingApps.length === 0) {
+          await db.query(
+            `INSERT INTO merchant_gateway_applications
+             (application_number, merchant_id, institution_id, branch_id, status, gateway_name, applied_at)
+             VALUES (?, ?, ?, ?, 'applied', ?, NOW())`,
+            [
+              `APP-${Date.now().toString().slice(-6)}`,
+              merchant.id,
+              Number(bankInstId),
+              kyc?.branch_id || null,
+              kyc?.bank_name || "Partner Bank",
+            ]
+          );
+        } else {
+          await db.query(
+            `UPDATE merchant_gateway_applications
+             SET status = 'applied', branch_id = COALESCE(?, branch_id), updated_at = NOW()
+             WHERE id = ?`,
+            [kyc?.branch_id || null, existingApps[0].id]
+          );
+        }
+
+        // Write to institution activity log so Bank Admin sees it in recent activities & notifications
+        await db.query(
+          `INSERT INTO institution_activity_logs
+           (institution_id, user_id, user_email, action, resource_type, resource_id, status_transition, details)
+           VALUES (?, ?, ?, 'merchant.application.submitted', 'merchant_application', ?, 'draft -> applied', ?)`,
+          [
+            Number(bankInstId),
+            userId,
+            contact?.email || null,
+            String(merchant.id),
+            JSON.stringify({
+              companyName: company,
+              merchantCode: merchant.merchant_code,
+              branchName: kyc?.branch_name || null,
+              bankName: kyc?.bank_name || null,
+            }),
+          ]
+        );
+      }
+    } catch (notifErr) {
+      console.warn("Non-blocking notification error on submission:", notifErr);
+    }
+
+    return {
       success: true,
-      message: "Merchant onboarding application submitted successfully. An administrator will review your submission.",
+      message: "Merchant onboarding application submitted successfully. An administrator and your designated bank will review your submission.",
       accountStatus: "submitted",
       kycStatus: "pending",
       submittedAt: new Date().toISOString(),
       onboardingStep: 7,
+    };
+  },
+
+  /**
+   * Resubmit field correction after merchant fixes flagged issues
+   */
+  async submitCorrection(userId, { issueId, fieldKey, note }) {
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    const [kyc] = await Promise.all([merchantRepository.getKyc(merchant.id)]);
+    const [profile] = await Promise.all([merchantRepository.getProfile(merchant.id)]);
+
+    // Check if issueId is provided, or resolve all open issues matching fieldKey
+    let targetIssues = [];
+    if (issueId) {
+      const [rows] = await db.query(
+        `SELECT * FROM kyc_field_issues WHERE id = ? AND merchant_id = ?`,
+        [Number(issueId), merchant.id]
+      );
+      targetIssues = rows;
+    } else if (fieldKey) {
+      const [rows] = await db.query(
+        `SELECT * FROM kyc_field_issues WHERE merchant_id = ? AND field_key = ? AND status = 'open'`,
+        [merchant.id, fieldKey]
+      );
+      targetIssues = rows;
+    } else {
+      const [rows] = await db.query(
+        `SELECT * FROM kyc_field_issues WHERE merchant_id = ? AND status = 'open'`,
+        [merchant.id]
+      );
+      targetIssues = rows;
+    }
+
+    if (targetIssues.length === 0) {
+      return { success: true, message: "No open issues found to resolve." };
+    }
+
+    for (const issue of targetIssues) {
+      await db.query(
+        `UPDATE kyc_field_issues
+         SET status = 'resolved', resolution_note = ?, updated_at = NOW()
+         WHERE id = ?`,
+        [note || "Corrected and re-submitted by merchant", issue.id]
+      );
+
+      // Notify the specific institution if issue has an institution_id
+      if (issue.institution_id) {
+        await db.query(
+          `INSERT INTO institution_activity_logs
+           (institution_id, user_id, user_email, action, resource_type, resource_id, status_transition, details)
+           VALUES (?, ?, ?, 'merchant.correction.resubmitted', 'kyc_field_issue', ?, 'open -> resolved', ?)`,
+          [
+            Number(issue.institution_id),
+            userId,
+            null,
+            String(issue.id),
+            JSON.stringify({
+              merchantCode: merchant.merchant_code,
+              companyName: profile?.company_name || merchant.merchant_code,
+              fieldKey: issue.field_key,
+              note: note || "Correction resubmitted",
+            }),
+          ]
+        );
+      }
+    }
+
+    // Check if any other issues remain open
+    const [remainingOpen] = await db.query(
+      `SELECT COUNT(*) AS cnt FROM kyc_field_issues WHERE merchant_id = ? AND status = 'open'`,
+      [merchant.id]
+    );
+
+    const hasRemaining = Number(remainingOpen[0]?.cnt || 0) > 0;
+    const newStatus = hasRemaining ? "additional_information_required" : "under_review";
+
+    await merchantRepository.updateMerchantStatus(merchant.id, newStatus, newStatus);
+    await db.query(
+      `UPDATE merchant_gateway_applications
+       SET status = ?
+       WHERE merchant_id = ? AND status = 'additional_information_required'`,
+      [newStatus, merchant.id]
+    );
+
+    // Notify Platform Admin
+    try {
+      const company = profile?.company_name || merchant.merchant_code;
+      await merchantRepository.createAdminNotification(
+        `Merchant Re-submitted Correction: ${company}`,
+        `Merchant ${company} (${merchant.merchant_code}) has updated and re-submitted their correction for review.`,
+        "kyc",
+        `/admin/kyc`
+      );
+    } catch (_) {}
+
+    return {
+      success: true,
+      message: "Correction re-submitted successfully. Bank and Admin compliance teams have been notified.",
+      accountStatus: newStatus,
+      kycStatus: newStatus,
+      remainingOpenIssues: Number(remainingOpen[0]?.cnt || 0),
     };
   },
 
@@ -1473,135 +1690,6 @@ export const merchantService = {
   },
 
   // ==========================================
-  // INVOICES
-  // ==========================================
-  async getInvoices(userId, filters = {}) {
-    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
-    const conditions = ["merchant_id = ?"];
-    const params = [merchant.id];
-
-    if (filters.status && filters.status !== "all") {
-      conditions.push("status = ?");
-      params.push(filters.status);
-    }
-
-    const [rows] = await db.execute(
-      `SELECT * FROM invoices WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`,
-      params
-    );
-
-    return rows.map((r) => ({
-      id: r.id,
-      invoiceNumber: r.invoice_number,
-      customerName: r.customer_name,
-      customerEmail: r.customer_email,
-      amount: Number(r.amount),
-      currency: r.currency || "BDT",
-      issueDate: r.issue_date,
-      dueDate: r.due_date,
-      status: r.status,
-      paymentReference: r.payment_reference,
-      items: typeof r.items === "string" ? JSON.parse(r.items) : (r.items || []),
-      createdAt: r.created_at,
-    }));
-  },
-
-  async getInvoiceById(userId, invoiceId) {
-    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
-    const [rows] = await db.execute(
-      "SELECT * FROM invoices WHERE id = ? AND merchant_id = ? LIMIT 1",
-      [invoiceId, merchant.id]
-    );
-    if (!rows.length) {
-      const err = new Error("Invoice not found");
-      err.statusCode = 404;
-      throw err;
-    }
-    const r = rows[0];
-    return {
-      id: r.id,
-      invoiceNumber: r.invoice_number,
-      customerName: r.customer_name,
-      customerEmail: r.customer_email,
-      amount: Number(r.amount),
-      currency: r.currency || "BDT",
-      issueDate: r.issue_date,
-      dueDate: r.due_date,
-      status: r.status,
-      paymentReference: r.payment_reference,
-      items: typeof r.items === "string" ? JSON.parse(r.items) : (r.items || []),
-      createdAt: r.created_at,
-    };
-  },
-
-  async createInvoice(userId, data) {
-    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
-    const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
-
-    const custName = data.customerName || data.customer_name || "Customer";
-    const custEmail = data.customerEmail || data.customer_email || "customer@example.com";
-    const totalAmount = data.amount ?? data.total_amount ?? 0;
-    const currency = data.currency || "BDT";
-    const issueDate = data.issueDate || data.issue_date || new Date().toISOString().split("T")[0];
-    const dueDate = data.dueDate || data.due_date || new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
-    const status = data.status || "draft";
-    const itemsJson = JSON.stringify(data.items || []);
-
-    const [res] = await db.execute(
-      `INSERT INTO invoices (invoice_number, merchant_id, customer_name, customer_email, amount, currency, issue_date, due_date, status, items, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [
-        invoiceNumber,
-        merchant.id,
-        custName,
-        custEmail,
-        totalAmount,
-        currency,
-        issueDate,
-        dueDate,
-        status,
-        itemsJson,
-      ]
-    );
-
-    return {
-      success: true,
-      message: "Invoice created successfully",
-      data: {
-        id: res.insertId,
-        invoiceId: res.insertId,
-        invoiceNumber,
-      },
-    };
-  },
-
-  async updateInvoice(userId, invoiceId, data) {
-    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
-    await db.execute(
-      `UPDATE invoices SET customer_name = ?, customer_email = ?, amount = ?, currency = ?, due_date = ?, status = ?, items = ?, updated_at = NOW()
-       WHERE id = ? AND merchant_id = ?`,
-      [
-        data.customerName,
-        data.customerEmail,
-        data.amount || 0,
-        data.currency || "BDT",
-        data.dueDate,
-        data.status,
-        JSON.stringify(data.items || []),
-        invoiceId,
-        merchant.id,
-      ]
-    );
-    return { success: true, message: "Invoice updated successfully" };
-  },
-
-  async deleteInvoice(userId, invoiceId) {
-    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
-    await db.execute("DELETE FROM invoices WHERE id = ? AND merchant_id = ?", [invoiceId, merchant.id]);
-    return { success: true, message: "Invoice deleted successfully" };
-  },
-
-  // ==========================================
   // SETTINGS
   // ==========================================
   async getSettings(userId) {
@@ -1648,5 +1736,32 @@ export const merchantService = {
     await db.execute("UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?", [hash, userId]);
 
     return { success: true, message: "Password updated successfully" };
+  },
+
+  // ==========================================
+  // BANKING INSTITUTIONS & BRANCHES FOR KYC
+  // ==========================================
+  async getActiveInstitutions() {
+    return adminInstitutionsRepository.getActiveInstitutions();
+  },
+
+  async getActiveBranchesForInstitution(institutionId) {
+    return adminInstitutionsRepository.getActiveBranchesForInstitution(institutionId);
+  },
+
+  async getGeoDivisions() {
+    return adminInstitutionsRepository.getGeoDivisions();
+  },
+
+  async getGeoDistricts(divisionId) {
+    return adminInstitutionsRepository.getGeoDistricts(divisionId);
+  },
+
+  async getGeoUpazilas(districtId) {
+    return adminInstitutionsRepository.getGeoUpazilas(districtId);
+  },
+
+  async getInstitutionKycRequirements(institutionId, serviceId) {
+    return merchantRepository.getInstitutionKycRequirements(institutionId, serviceId);
   },
 };

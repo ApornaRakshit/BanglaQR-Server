@@ -6,6 +6,9 @@ import {
   requestPasswordReset,
   verifyResetToken,
   resetPassword,
+  verifyInstitutionInvitation,
+  acceptInstitutionInvitation,
+  changeUserPassword,
 } from "./auth.service.js";
 
 import {
@@ -15,6 +18,7 @@ import {
   resendOtpSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  changePasswordSchema,
 } from "./auth.validation.js";
 
 export async function register(req, res, next) {
@@ -107,6 +111,8 @@ export async function me(req, res, next) {
           phone: req.user.phone,
           status: req.user.status,
           role: req.user.role,
+          roles: req.user.roles || (req.user.role ? [req.user.role] : []),
+          isMerchant: Boolean(req.user.isMerchant),
           permissions: req.user.permissions || [],
           emailVerified: Boolean(
             req.user.email_verified_at
@@ -116,6 +122,11 @@ export async function me(req, res, next) {
           ),
           twoFactorEnabled:
             Boolean(req.user.two_factor_enabled),
+          mustChangePassword: Boolean(req.user.must_change_password),
+          institution: req.user.institution || null,
+          institutionId: req.user.institutionId || null,
+          institutionRole: req.user.institutionRole || null,
+          institutionMemberships: req.user.institutionMemberships || [],
         },
       },
     });
@@ -217,6 +228,66 @@ export async function logout(req, res, next) {
         message: "Logout successful",
       });
   } catch (error) {
+    next(error);
+  }
+}
+
+export async function verifyInstitutionInvitationController(req, res, next) {
+  try {
+    const token = req.query.token || req.body?.token;
+    if (!token) {
+      return res.status(400).json({ success: false, message: "Invitation token is required" });
+    }
+    const result = await verifyInstitutionInvitation(token);
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function acceptInstitutionInvitationController(req, res, next) {
+  try {
+    const { token, password, name, phone } = req.body;
+    if (!token) {
+      return res.status(400).json({ success: false, message: "Invitation token is required" });
+    }
+    const result = await acceptInstitutionInvitation({ token, password, name, phone });
+    res.json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function changePassword(req, res, next) {
+  try {
+    const validated = changePasswordSchema.parse(req.body);
+    const result = await changeUserPassword({
+      userId: req.user.id,
+      currentPassword: validated.currentPassword,
+      newPassword: validated.newPassword,
+    });
+
+    res.json({
+      success: true,
+      message: result.message,
+    });
+  } catch (error) {
+    if (error.name === "ZodError") {
+      const issues = error.issues || error.errors || [];
+      const errorDetails = issues.map((e) => `${(e.path || []).join(".")}: ${e.message}`).join(", ");
+      return res.status(400).json({
+        success: false,
+        message: `Validation failed: ${errorDetails}`,
+        errors: issues,
+      });
+    }
     next(error);
   }
 }

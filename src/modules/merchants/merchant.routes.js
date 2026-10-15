@@ -26,6 +26,14 @@ router.put("/me/commercial", merchantController.updateCommercial);
 router.get("/me/kyc", merchantController.getKyc);
 router.put("/me/kyc", merchantController.updateKyc);
 
+// Banking Institutions & Branches for Settlement & KYC
+router.get("/institutions", merchantController.getInstitutions);
+router.get("/institutions/:institutionId/branches", merchantController.getInstitutionBranches);
+router.get("/institutions/:institutionId/kyc-requirements", merchantController.getInstitutionKycRequirements);
+router.get("/geo/divisions", merchantController.getGeoDivisions);
+router.get("/geo/districts", merchantController.getGeoDistricts);
+router.get("/geo/upazilas", merchantController.getGeoUpazilas);
+
 // Step 5: Documents
 router.get("/me/documents", merchantController.getDocuments);
 router.post("/me/documents", uploadDocument.single("file"), merchantController.uploadDocument);
@@ -33,8 +41,9 @@ router.post("/me/documents/:id/replace", uploadDocument.single("file"), merchant
 router.delete("/me/documents/:id", merchantController.deleteDocument);
 router.get("/me/documents/:id/view", merchantController.viewDocument);
 
-// Step 7: Application Submission
+// Step 7: Application Submission & Corrections
 router.post("/me/submit", merchantController.submitApplication);
+router.post("/me/corrections/resubmit", merchantController.submitCorrection);
 
 // --- Payment Services: Gateway Catalogue & Applications ---
 router.get("/me/gateways", merchantController.getGateways);
@@ -83,30 +92,6 @@ router.get("/me/support", merchantController.getSupportTickets);
 router.get("/me/support/:id", merchantController.getSupportTicketById);
 router.post("/me/support", merchantController.createSupportTicket);
 router.post("/me/support/:id/reply", merchantController.replySupportTicket);
-
-import { merchantInvoicesController } from "./invoices/merchant.invoices.controller.js";
-
-// --- Invoices & Billing ---
-router.get("/me/invoices/stats", merchantInvoicesController.getStats);
-router.get("/me/invoices/next-number", merchantInvoicesController.getNextNumber);
-router.get("/me/invoices", merchantInvoicesController.list);
-router.get("/me/invoices/export.xlsx", merchantInvoicesController.exportExcel);
-router.get("/me/invoices/:id", merchantInvoicesController.getById);
-router.get("/me/invoices/:id/pdf", merchantInvoicesController.downloadPdf);
-router.get("/me/invoices/:id/payment-link", merchantInvoicesController.getPaymentLink);
-router.post("/me/invoices", merchantInvoicesController.create);
-router.put("/me/invoices/:id", merchantInvoicesController.update);
-router.post("/me/invoices/:id/send", merchantInvoicesController.send);
-router.post("/me/invoices/:id/remind", merchantInvoicesController.sendReminder);
-router.post("/me/invoices/:id/payments", merchantInvoicesController.recordPayment);
-router.post("/me/invoices/:id/cancel", merchantInvoicesController.cancel);
-
-// --- Invoice Customer Management ---
-router.get("/me/invoice-customers", merchantInvoicesController.listCustomers);
-router.post("/me/invoice-customers", merchantInvoicesController.createCustomer);
-router.get("/me/invoice-customers/:customerId", merchantInvoicesController.getCustomerById);
-router.put("/me/invoice-customers/:customerId", merchantInvoicesController.updateCustomer);
-router.delete("/me/invoice-customers/:customerId", merchantInvoicesController.deleteCustomer);
 
 // --- Settings ---
 router.get("/me/settings", merchantController.getSettings);

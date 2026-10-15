@@ -1,0 +1,3 @@
+-- Migration 006: Add must_change_password to users
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password TINYINT(1) NOT NULL DEFAULT 0 AFTER status;
+

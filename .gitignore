@@ -1,0 +1,21 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and build artifacts
+node_modules/
+dist/
+coverage/
+
+# Logs and runtime artifacts
+*.log
+logs/
+
+# Uploads may contain sensitive user documents; do not commit them
+public/uploads/
+
+# Editor/OS artifacts
+.vscode/
+.idea/
+.DS_Store

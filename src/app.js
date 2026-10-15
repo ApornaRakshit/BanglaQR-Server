@@ -10,6 +10,7 @@ import merchantRoutes from "./modules/merchants/merchant.routes.js";
 import adminRoutes from "./modules/admin/admin.routes.js";
 import publicRoutes from "./modules/public/public.routes.js";
 import paymentsRoutes from "./modules/payments/payments.routes.js";
+import institutionRoutes from "./modules/institution/institution.routes.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 
 import { env } from "./config/env.js";
@@ -65,6 +66,12 @@ app.use(
 app.use(
   "/uploads/cms",
   express.static(path.join(process.cwd(), "storage", "public_cms"))
+);
+
+// Serve public uploads (institutions, gateways, documents)
+app.use(
+  "/uploads",
+  express.static(path.join(process.cwd(), "public", "uploads"))
 );
 
 app.use(
@@ -123,6 +130,11 @@ app.use(
 app.use(
   "/api/v1/payments",
   paymentsRoutes
+);
+
+app.use(
+  "/api/v1/institution",
+  institutionRoutes
 );
 
 app.use(errorHandler);

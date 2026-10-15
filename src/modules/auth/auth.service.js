@@ -1,4 +1,5 @@
 import argon2 from "argon2";
+import crypto from "crypto";
 
 import { db } from "../../config/db.js";
 import { env, isDevVerificationBypass } from "../../config/env.js";
@@ -612,12 +613,8 @@ export async function loginUser({
         u.email_verified_at,
         u.phone_verified_at,
         u.status,
-        r.name AS role
+        COALESCE(u.must_change_password, 0) AS must_change_password
       FROM users u
-      LEFT JOIN user_roles ur
-        ON ur.user_id = u.id
-      LEFT JOIN roles r
-        ON r.id = ur.role_id
       WHERE u.email = ?
       LIMIT 1
     `,
@@ -633,6 +630,30 @@ export async function loginUser({
   }
 
   const user = rows[0];
+
+  // Fetch all platform roles assigned in user_roles
+  const [roleRows] = await db.execute(
+    `
+      SELECT r.id, r.name
+      FROM user_roles ur
+      JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = ?
+    `,
+    [user.id]
+  );
+  user.roles = roleRows.map((r) => r.name);
+  user.role = user.roles[0] || null;
+
+  // Check merchant status
+  const [merchantRows] = await db.execute(
+    `SELECT id FROM merchants WHERE user_id = ? LIMIT 1`,
+    [user.id]
+  );
+  user.isMerchant = merchantRows.length > 0 || user.roles.includes("merchant");
+  if (user.isMerchant && !user.roles.includes("merchant")) {
+    user.roles.push("merchant");
+    if (!user.role) user.role = "merchant";
+  }
 
   const passwordValid = await argon2.verify(
     user.password_hash,
@@ -699,6 +720,52 @@ export async function loginUser({
     }
   }
 
+  // Fetch all active institution memberships if applicable
+  const [instRows] = await db.execute(
+    `
+      SELECT
+        iu.id AS membership_id,
+        iu.institution_id,
+        iu.role_id AS institution_role_id,
+        iu.membership_status,
+        iu.staff_name,
+        i.name AS institution_name,
+        i.institution_code,
+        i.institution_type,
+        i.logo_url,
+        i.status AS institution_status,
+        r.name AS institution_role
+      FROM institution_users iu
+      JOIN institutions i ON i.id = iu.institution_id
+      JOIN roles r ON r.id = iu.role_id
+      WHERE iu.user_id = ? AND iu.membership_status = 'active'
+      ORDER BY iu.id ASC
+    `,
+    [user.id]
+  );
+
+  const institutionMemberships = instRows.map((row) => ({
+    membershipId: row.membership_id,
+    institutionId: row.institution_id,
+    name: row.institution_name,
+    code: row.institution_code,
+    type: row.institution_type,
+    logoUrl: row.logo_url,
+    status: row.institution_status,
+    role: row.institution_role,
+    staffName: row.staff_name,
+  }));
+
+  const institution = institutionMemberships[0] || null;
+
+  // If user has no platform role but has an institution role, assign it so token and user state reflect it
+  if (!user.role && institution?.role) {
+    user.role = institution.role;
+    if (!user.roles.includes(institution.role)) {
+      user.roles.push(institution.role);
+    }
+  }
+
   const accessToken = createAccessToken(user);
 
   return {
@@ -708,7 +775,14 @@ export async function loginUser({
       email: user.email,
       phone: user.phone,
       role: user.role,
+      roles: user.roles || (user.role ? [user.role] : []),
+      isMerchant: Boolean(user.isMerchant),
       status: user.status,
+      mustChangePassword: Boolean(user.must_change_password),
+      institution,
+      institutionId: institution?.institutionId || null,
+      institutionRole: institution?.role || null,
+      institutionMemberships,
     },
   };
 }
@@ -1061,4 +1135,240 @@ export async function resetPassword({ token, newPassword }) {
   } finally {
     connection.release();
   }
+}
+
+export async function verifyInstitutionInvitation(rawToken) {
+  if (!rawToken || typeof rawToken !== "string" || !rawToken.trim()) {
+    const error = new Error("Invalid or missing invitation token");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const tokenHash = crypto.createHash("sha256").update(rawToken.trim()).digest("hex");
+
+  const [rows] = await db.query(
+    `
+    SELECT
+      inv.id,
+      inv.institution_id,
+      inv.email,
+      inv.name,
+      inv.phone,
+      inv.role_id,
+      inv.status,
+      inv.expires_at,
+      i.name AS institution_name,
+      i.institution_code,
+      i.logo_url AS institution_logo,
+      i.status AS institution_status,
+      r.name AS role_name,
+      r.description AS role_description
+    FROM institution_invitations inv
+    JOIN institutions i ON i.id = inv.institution_id
+    JOIN roles r ON r.id = inv.role_id
+    WHERE inv.token_hash = ?
+    LIMIT 1
+    `,
+    [tokenHash]
+  );
+
+  if (!rows.length) {
+    const error = new Error("Invitation token is invalid or does not exist");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const inv = rows[0];
+
+  if (inv.status === "accepted") {
+    const error = new Error("This invitation has already been accepted. Please sign in directly.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (inv.status === "revoked") {
+    const error = new Error("This invitation has been revoked by an administrator.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (inv.status === "expired" || new Date(inv.expires_at) < new Date()) {
+    if (inv.status !== "expired") {
+      await db.execute(`UPDATE institution_invitations SET status = 'expired' WHERE id = ?`, [inv.id]);
+    }
+    const error = new Error("This invitation link has expired. Please contact your administrator for a new invitation.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Check if an existing account already exists
+  const [userRows] = await db.query(
+    `SELECT id, email, password_hash, status FROM users WHERE email = ? LIMIT 1`,
+    [inv.email]
+  );
+  const isExistingUser = userRows.length > 0 && !!userRows[0].password_hash;
+
+  return {
+    valid: true,
+    invitationId: inv.id,
+    email: inv.email,
+    name: inv.name,
+    phone: inv.phone,
+    institutionId: inv.institution_id,
+    institutionName: inv.institution_name,
+    institutionCode: inv.institution_code,
+    institutionLogo: inv.institution_logo,
+    roleName: inv.role_name,
+    roleDescription: inv.role_description,
+    expiresAt: inv.expires_at,
+    isExistingUser,
+  };
+}
+
+export async function acceptInstitutionInvitation({ token: rawToken, password, name, phone }) {
+  const verified = await verifyInstitutionInvitation(rawToken);
+  const tokenHash = crypto.createHash("sha256").update(rawToken.trim()).digest("hex");
+
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [invRows] = await connection.query(
+      `SELECT * FROM institution_invitations WHERE token_hash = ? FOR UPDATE`,
+      [tokenHash]
+    );
+    if (!invRows.length || invRows[0].status !== "pending") {
+      const err = new Error("Invitation is no longer pending or has already been used");
+      err.statusCode = 400;
+      throw err;
+    }
+    const inv = invRows[0];
+
+    // Check if user already exists
+    const [userRows] = await connection.query(
+      `SELECT id, email, phone, password_hash, email_verified_at, status FROM users WHERE email = ? LIMIT 1 FOR UPDATE`,
+      [inv.email]
+    );
+
+    let userId;
+    let staffName = (name || inv.name || "").trim() || null;
+    let staffPhone = (phone || inv.phone || "").trim() || null;
+
+    if (userRows.length > 0) {
+      const existingUser = userRows[0];
+      userId = existingUser.id;
+
+      // If user does NOT have a password set yet, set it now
+      if (!existingUser.password_hash) {
+        if (!password || password.length < 6) {
+          const err = new Error("Password must be at least 6 characters");
+          err.statusCode = 400;
+          throw err;
+        }
+        const passwordHash = await argon2.hash(password);
+        await connection.execute(
+          `UPDATE users SET password_hash = ?, email_verified_at = COALESCE(email_verified_at, NOW()), status = 'active', updated_at = NOW() WHERE id = ?`,
+          [passwordHash, userId]
+        );
+      }
+      // If user already has a password (e.g. existing merchant):
+      // Do NOT overwrite password, email verification, or platform roles!
+    } else {
+      // New user
+      if (!password || password.length < 6) {
+        const err = new Error("Password must be at least 6 characters");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (staffPhone) {
+        const [phoneUsers] = await connection.query(
+          `SELECT id FROM users WHERE phone = ? LIMIT 1`,
+          [staffPhone]
+        );
+        if (phoneUsers.length > 0) {
+          staffPhone = null;
+        }
+      }
+      const passwordHash = await argon2.hash(password);
+      const [insertUser] = await connection.execute(
+        `INSERT INTO users (email, phone, password_hash, email_verified_at, status, created_at, updated_at) VALUES (?, ?, ?, NOW(), 'active', NOW(), NOW())`,
+        [inv.email, staffPhone, passwordHash]
+      );
+      userId = insertUser.insertId;
+      // CRITICAL: Do NOT insert any Bank role into user_roles!
+    }
+
+    // Upsert institution_users membership
+    const [existingMembership] = await connection.query(
+      `SELECT id FROM institution_users WHERE user_id = ? AND institution_id = ? LIMIT 1`,
+      [userId, inv.institution_id]
+    );
+
+    if (existingMembership.length > 0) {
+      await connection.execute(
+        `UPDATE institution_users SET role_id = ?, membership_status = 'active', staff_name = COALESCE(?, staff_name), updated_at = NOW() WHERE id = ?`,
+        [inv.role_id, staffName, existingMembership[0].id]
+      );
+    } else {
+      await connection.execute(
+        `INSERT INTO institution_users (institution_id, user_id, staff_name, role_id, membership_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', NOW(), NOW())`,
+        [inv.institution_id, userId, staffName, inv.role_id]
+      );
+    }
+
+    // Mark invitation as accepted
+    await connection.execute(
+      `UPDATE institution_invitations SET status = 'accepted', accepted_at = NOW(), updated_at = NOW() WHERE id = ?`,
+      [inv.id]
+    );
+
+    await connection.commit();
+
+    return {
+      success: true,
+      message: "Account activated successfully. You can now log in to the institution portal.",
+      email: inv.email,
+      institutionId: inv.institution_id,
+      targetPortal: "/institution/dashboard",
+    };
+  } catch (err) {
+    await connection.rollback();
+    throw err;
+  } finally {
+    connection.release();
+  }
+}
+
+export async function changeUserPassword({ userId, currentPassword, newPassword }) {
+  const [rows] = await db.query(
+    `SELECT id, email, password_hash FROM users WHERE id = ? LIMIT 1`,
+    [userId]
+  );
+
+  if (!rows.length) {
+    const error = new Error("User not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const user = rows[0];
+
+  const isValid = await argon2.verify(user.password_hash, currentPassword);
+  if (!isValid) {
+    const error = new Error("Current password is incorrect");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const newHash = await argon2.hash(newPassword);
+
+  await db.execute(
+    `UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = NOW() WHERE id = ?`,
+    [newHash, userId]
+  );
+
+  return {
+    success: true,
+    message: "Password updated successfully",
+  };
 }

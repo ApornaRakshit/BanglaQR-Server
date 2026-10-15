@@ -70,8 +70,15 @@ export const kycSchema = z.object({
   ),
   nidIssueDate: z.string().trim().optional().nullable().default(null),
   nidExpiryDate: z.string().trim().optional().nullable().default(null),
+  institutionId: z.coerce.number().positive().optional().nullable().default(null),
+  branchId: z.coerce.number().positive().optional().nullable().default(null),
   bankName: z.string().trim().min(2, "Please select or provide a valid bank name"),
   branchName: z.string().trim().min(2, "Branch name must be at least 2 characters"),
+  branchCode: z.string().trim().optional().nullable().default(null),
+  division: z.string().trim().optional().nullable().default(null),
+  district: z.string().trim().optional().nullable().default(null),
+  upazila: z.string().trim().optional().nullable().default(null),
+  branchAddress: z.string().trim().optional().nullable().default(null),
   accountHolderName: z.string().trim().min(2, "Account holder name must be at least 2 characters"),
   accountNumber: z.string().trim()
     .min(8, "Bank account number must be at least 8 digits")

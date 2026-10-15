@@ -11,6 +11,9 @@ import {
   forgotPassword,
   verifyResetTokenController,
   resetPasswordController,
+  verifyInstitutionInvitationController,
+  acceptInstitutionInvitationController,
+  changePassword,
 } from "./auth.controller.js";
 
 import { requireAuth } from "../../middlewares/auth.js";
@@ -31,6 +34,10 @@ router.get("/verify-reset-token", verifyResetTokenController);
 
 router.post("/reset-password", resetPasswordController);
 
+// Institution invitation activation routes
+router.get("/institution-invitations/verify", verifyInstitutionInvitationController);
+router.post("/institution-invitations/accept", acceptInstitutionInvitationController);
+
 router.post("/login", login);
 
 router.get(
@@ -38,6 +45,8 @@ router.get(
   requireAuth,
   me
 );
+
+router.post("/change-password", requireAuth, changePassword);
 
 router.post("/logout", logout);
 

@@ -187,6 +187,16 @@ export const merchantController = {
     }
   },
 
+  async submitCorrection(req, res, next) {
+    try {
+      const { issueId, fieldKey, note } = req.body || {};
+      const result = await merchantService.submitCorrection(req.user.id, { issueId, fieldKey, note });
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
   // --- Gateways ---
   async getGateways(req, res, next) {
     try {
@@ -374,55 +384,6 @@ export const merchantController = {
     }
   },
 
-  // --- Invoices ---
-  async getInvoices(req, res, next) {
-    try {
-      const data = await merchantService.getInvoices(req.user.id, req.query);
-      res.json({ success: true, data });
-    } catch (error) {
-      next(error);
-    }
-  },
-
-  async getInvoiceById(req, res, next) {
-    try {
-      const id = Number(req.params.id);
-      const data = await merchantService.getInvoiceById(req.user.id, id);
-      res.json({ success: true, data });
-    } catch (error) {
-      next(error);
-    }
-  },
-
-  async createInvoice(req, res, next) {
-    try {
-      const result = await merchantService.createInvoice(req.user.id, req.body);
-      res.status(201).json(result);
-    } catch (error) {
-      next(error);
-    }
-  },
-
-  async updateInvoice(req, res, next) {
-    try {
-      const id = Number(req.params.id);
-      const result = await merchantService.updateInvoice(req.user.id, id, req.body);
-      res.json(result);
-    } catch (error) {
-      next(error);
-    }
-  },
-
-  async deleteInvoice(req, res, next) {
-    try {
-      const id = Number(req.params.id);
-      const result = await merchantService.deleteInvoice(req.user.id, id);
-      res.json(result);
-    } catch (error) {
-      next(error);
-    }
-  },
-
   // --- Settings ---
   async getSettings(req, res, next) {
     try {
@@ -437,6 +398,66 @@ export const merchantController = {
     try {
       const result = await merchantService.changePassword(req.user.id, req.body);
       res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // --- Banking Institutions & Branches for KYC ---
+  async getInstitutions(req, res, next) {
+    try {
+      const data = await merchantService.getActiveInstitutions();
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getInstitutionBranches(req, res, next) {
+    try {
+      const institutionId = Number(req.params.institutionId);
+      const data = await merchantService.getActiveBranchesForInstitution(institutionId);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getGeoDivisions(req, res, next) {
+    try {
+      const data = await merchantService.getGeoDivisions();
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getGeoDistricts(req, res, next) {
+    try {
+      const { divisionId, division } = req.query;
+      const data = await merchantService.getGeoDistricts(divisionId || division || null);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getGeoUpazilas(req, res, next) {
+    try {
+      const { districtId, district } = req.query;
+      const data = await merchantService.getGeoUpazilas(districtId || district || null);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getInstitutionKycRequirements(req, res, next) {
+    try {
+      const institutionId = Number(req.params.institutionId);
+      const serviceId = req.query.serviceId ? Number(req.query.serviceId) : null;
+      const data = await merchantService.getInstitutionKycRequirements(institutionId, serviceId);
+      res.json({ success: true, data });
     } catch (error) {
       next(error);
     }
