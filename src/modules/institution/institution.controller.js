@@ -1,3 +1,4 @@
+import fs from "fs";
 import { institutionService } from "./institution.service.js";
 import {
   applicationReviewSchema,
@@ -129,6 +130,32 @@ export const institutionController = {
       });
 
       res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async viewDocument(req, res, next) {
+    try {
+      const institutionId = getTargetInstitutionId(req);
+      const { id, docId } = req.params;
+
+      const fileInfo = await institutionService.getApplicationDocumentFile({
+        applicationId: id,
+        documentId: docId,
+        institutionId,
+        assignedBranchIds: req.user.assignedBranchIds,
+      });
+
+      res.setHeader("Content-Type", fileInfo.mimeType);
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${encodeURIComponent(fileInfo.documentName)}"`
+      );
+      res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate");
+
+      const stream = fs.createReadStream(fileInfo.filePath);
+      stream.pipe(res);
     } catch (err) {
       next(err);
     }

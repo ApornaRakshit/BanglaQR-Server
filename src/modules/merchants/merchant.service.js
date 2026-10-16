@@ -230,9 +230,12 @@ export const merchantService = {
         institutionId: fi.institution_id,
         institutionName: fi.institution_name,
         branchName: fi.branch_name,
-        fieldKey: fi.field_key,
-        issueType: fi.issue_type,
-        issueReason: fi.issue_reason,
+        fieldKey: fi.field_key || "",
+        field_key: fi.field_key || "",
+        issueType: fi.issue_type || "",
+        issue_type: fi.issue_type || "",
+        issueReason: fi.issue_reason || "",
+        issue_reason: fi.issue_reason || "",
         status: fi.status,
         resolutionNote: fi.resolution_note,
         createdAt: fi.created_at,
@@ -412,6 +415,16 @@ export const merchantService = {
       { documentId: doc.id, documentType: normalizedType }
     );
 
+    // Auto-resolve open KYC issue matching this document type
+    const docKey = String(normalizedType || "").toLowerCase();
+    await db.query(
+      `UPDATE kyc_field_issues 
+       SET status = 'resolved', resolution_note = 'Document uploaded by merchant', updated_at = NOW()
+       WHERE merchant_id = ? AND status = 'open' 
+       AND (field_key = ? OR field_key = ? OR LOWER(field_key) LIKE ?)`,
+      [merchant.id, docKey, normalizedType, `%${docKey}%`]
+    );
+
     return {
       ...doc,
       documentType: normalizeDocType(doc.document_type),
@@ -458,6 +471,16 @@ export const merchantService = {
       merchant.account_status,
       merchant.account_status,
       { documentId: docId }
+    );
+
+    // Auto-resolve any open KYC issue for this document type
+    const docKey = String(existingDoc.document_type || "").toLowerCase();
+    await db.query(
+      `UPDATE kyc_field_issues 
+       SET status = 'resolved', resolution_note = 'New document uploaded by merchant', updated_at = NOW()
+       WHERE merchant_id = ? AND status = 'open' 
+       AND (field_key = ? OR field_key = ? OR LOWER(field_key) LIKE ?)`,
+      [merchant.id, docKey, existingDoc.document_type, `%${docKey}%`]
     );
 
     return {

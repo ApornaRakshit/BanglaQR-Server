@@ -21,6 +21,7 @@ router.get("/dashboard", requireInstitutionPermission("institution.dashboard.vie
 // Merchant Applications & KYC Correction Workflow
 router.get("/applications", requireInstitutionPermission("institution.application.view"), institutionController.listApplications);
 router.get("/applications/:id", requireInstitutionPermission("institution.application.view"), institutionController.getApplication);
+router.get("/applications/:id/documents/:docId/view", requireInstitutionPermission("institution.application.view"), institutionController.viewDocument);
 router.post("/applications/:id/correction", requireInstitutionPermission("institution.application.request_info"), institutionController.requestCorrection);
 router.patch("/applications/corrections/:issueId/resolve", requireInstitutionPermission("institution.application.request_info"), institutionController.resolveCorrection);
 router.post("/applications/:id/review", requireInstitutionPermission("institution.application.review"), institutionController.reviewApplication);

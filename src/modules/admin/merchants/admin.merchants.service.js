@@ -141,7 +141,7 @@ export const adminMerchantsService = {
           `UPDATE merchants SET account_status = 'rejected', kyc_status = 'rejected', rejected_at = NOW(), rejection_reason = ?, admin_comments = ?, updated_at = NOW() WHERE id = ?`,
           [reason || "Compliance mismatch", comment || reason, merchantId]
         );
-      } else if (action === "request_information") {
+      } else if (action === "request_information" || action === "request_info") {
         newAccountStatus = "additional_information_required";
         newKycStatus = "additional_information_required";
 
@@ -151,12 +151,53 @@ export const adminMerchantsService = {
             JSON.stringify({
               reason: reason || "Additional information requested",
               comment: comment || "",
-              requiredItems,
+              requiredItems: requiredItems || [],
               requestedAt: new Date().toISOString(),
             }),
             merchantId,
           ]
         );
+
+        // Also record individual field issues in kyc_field_issues so merchant UI flags them precisely
+        if (Array.isArray(requiredItems) && requiredItems.length > 0) {
+          const [kycRows] = await conn.execute(
+            `SELECT id, institution_id FROM merchant_kyc WHERE merchant_id = ? LIMIT 1`,
+            [merchantId]
+          );
+          const kycId = kycRows[0]?.id || null;
+          const instId = kycRows[0]?.institution_id || null;
+
+          const itemKeyMap = {
+            "Company Information": "legal_business_name",
+            "Contact Details": "authorized_person_name",
+            "Commercial Projections": "commercial",
+            "KYC Legal Details": "trade_license_number",
+            "NID Front Document": "nid_front",
+            "NID Back Document": "nid_back",
+            "TIN Certificate": "tin_certificate",
+            "Cancelled Bank Cheque": "cancelled_bank_cheque",
+            "Trade License": "trade_license",
+            "BIN Certificate": "bin",
+          };
+
+          for (const item of requiredItems) {
+            const fieldKey = itemKeyMap[item] || item.toLowerCase().replace(/\s+/g, "_");
+            // Mark existing open issue for this field or insert new
+            await conn.execute(
+              `INSERT INTO kyc_field_issues 
+               (merchant_id, kyc_id, institution_id, field_key, issue_type, issue_reason, reviewer_id, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'incorrect_value', ?, ?, 'open', NOW(), NOW())`,
+              [
+                merchantId,
+                kycId,
+                instId,
+                fieldKey,
+                comment || reason || `Correction requested: ${item}`,
+                adminUser?.id || null,
+              ]
+            );
+          }
+        }
       } else if (action === "suspend") {
         newAccountStatus = "suspended";
         await conn.execute(

@@ -1,3 +1,7 @@
+import fs from "fs";
+import path from "path";
+import { db } from "../../config/db.js";
+import { secureStorage } from "../../config/storage.js";
 import { institutionRepository } from "./institution.repository.js";
 import { logAdminAudit } from "../../utils/auditLogger.js";
 
@@ -225,10 +229,13 @@ export const institutionService = {
     if (details.application?.merchant_id) {
       const merchantId = details.application.merchant_id;
       if (status === "approved") {
+        // Bank review approved: record bank approval on gateway application,
+        // but preserve master merchant status as under_review/pending admin approval
+        // Do NOT activate/approve master merchant until Super Admin final review.
         await db.query(
           `UPDATE merchants 
-           SET account_status = 'approved', kyc_status = 'approved', approved_at = NOW(), updated_at = NOW()
-           WHERE id = ?`,
+           SET kyc_status = 'under_review', updated_at = NOW()
+           WHERE id = ? AND account_status != 'approved'`,
           [merchantId]
         );
       } else if (status === "rejected") {
@@ -433,5 +440,49 @@ export const institutionService = {
       })),
       recentActivity: recentLogs,
     };
+  },
+
+  /**
+   * Securely retrieve KYC document file for an application
+   */
+  async getApplicationDocumentFile({ applicationId, documentId, institutionId, assignedBranchIds }) {
+    const details = await institutionRepository.getApplicationDetails(
+      applicationId,
+      institutionId,
+      assignedBranchIds
+    );
+
+    if (!details) {
+      const err = new Error("Application not found or unauthorized.");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const doc = (details.documents || []).find((d) => d.id === Number(documentId));
+    if (!doc) {
+      const err = new Error("Document not found for this merchant application.");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    try {
+      const filePath = secureStorage.getFilePath(doc.storage_key, details.application.merchant_id);
+      if (!fs.existsSync(filePath)) {
+        const err = new Error("Document file not found in secure storage.");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      return {
+        filePath,
+        mimeType: doc.mime_type || "application/octet-stream",
+        documentName: doc.original_filename || doc.document_name || "document",
+        documentType: doc.document_type,
+      };
+    } catch (e) {
+      const err = new Error(e.message || "Cannot access document storage.");
+      err.statusCode = 403;
+      throw err;
+    }
   },
 };

@@ -18,6 +18,7 @@ const reviewMerchantSchema = z.object({
     "approve",
     "reject",
     "request_information",
+    "request_info",
     "suspend",
     "activate",
   ]),

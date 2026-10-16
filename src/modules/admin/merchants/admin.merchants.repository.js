@@ -160,6 +160,7 @@ export const adminMerchantsRepository = {
     const [commercials] = await db.execute("SELECT * FROM merchant_commercial_details WHERE merchant_id = ? LIMIT 1", [merchantId]);
     const [kycs] = await db.execute("SELECT * FROM merchant_kyc WHERE merchant_id = ? LIMIT 1", [merchantId]);
     const [documents] = await db.execute("SELECT id, merchant_id, document_type, document_name, mime_type, file_size, status, review_comment, uploaded_at, reviewed_at, created_at FROM merchant_documents WHERE merchant_id = ?", [merchantId]);
+    const [fieldIssues] = await db.execute("SELECT * FROM kyc_field_issues WHERE merchant_id = ? ORDER BY id DESC", [merchantId]);
     const [services] = await db.execute(`
       SELECT mgs.*, g.name AS gateway_name, g.code AS gateway_code, g.service_fee
       FROM merchant_gateway_services mgs
@@ -259,6 +260,16 @@ export const adminMerchantsRepository = {
         serviceFee: s.service_fee,
         status: s.status,
         activatedAt: s.activated_at,
+      })),
+      fieldIssues: fieldIssues.map((fi) => ({
+        id: fi.id,
+        fieldKey: fi.field_key,
+        issueType: fi.issue_type,
+        issueReason: fi.issue_reason,
+        status: fi.status,
+        resolutionNote: fi.resolution_note,
+        createdAt: fi.created_at,
+        updatedAt: fi.updated_at,
       })),
     };
   },
