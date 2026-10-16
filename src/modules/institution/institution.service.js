@@ -143,6 +143,36 @@ export const institutionService = {
       userAgent: reqMeta.userAgent,
     });
 
+    // 4. Send persistent notification to Merchant and Admin
+    try {
+      const [mUserRows] = await db.query(
+        "SELECT user_id, merchant_code FROM merchants WHERE id = ?",
+        [application.merchant_id]
+      );
+      if (mUserRows.length > 0) {
+        await db.query(
+          `INSERT INTO notifications (recipient_type, recipient_id, title, message, type, link, is_read, created_at)
+           VALUES ('merchant', ?, ?, ?, 'kyc', '/merchant/onboarding/kyc', 0, NOW())`,
+          [
+            mUserRows[0].user_id,
+            "Action Required: Information Update Needed",
+            `Your designated bank has requested a correction for: ${fieldKey.replace(/_/g, " ")}. Note: ${issueReason}`,
+          ]
+        );
+
+        await db.query(
+          `INSERT INTO notifications (recipient_type, recipient_id, title, message, type, link, is_read, created_at)
+           VALUES ('admin', NULL, ?, ?, 'kyc', '/admin/merchants', 0, NOW())`,
+          [
+            `Bank Correction Request: ${mUserRows[0].merchant_code}`,
+            `Bank reviewer requested correction for field '${fieldKey}' on application ${application.application_number || applicationId}.`,
+          ]
+        );
+      }
+    } catch (notifErr) {
+      console.warn("Failed to create correction notifications:", notifErr);
+    }
+
     return {
       success: true,
       issueId,
@@ -268,6 +298,63 @@ export const institutionService = {
       ip: reqMeta.ip,
       userAgent: reqMeta.userAgent,
     });
+
+    // Send persistent notifications to Merchant and Admin on Bank Decision
+    try {
+      if (details.application?.merchant_id) {
+        const [mUserRows] = await db.query(
+          "SELECT user_id, merchant_code FROM merchants WHERE id = ?",
+          [details.application.merchant_id]
+        );
+        if (mUserRows.length > 0) {
+          const mUserId = mUserRows[0].user_id;
+          const mCode = mUserRows[0].merchant_code;
+
+          if (status === "approved") {
+            // Forwarded to Admin final approval
+            await db.query(
+              `INSERT INTO notifications (recipient_type, recipient_id, title, message, type, link, is_read, created_at)
+               VALUES ('merchant', ?, ?, ?, 'kyc', '/merchant/dashboard', 0, NOW())`,
+              [
+                mUserId,
+                "Bank Review Approved • Pending Final Admin Approval",
+                "Your designated partner bank has reviewed and approved your application. It has been forwarded for Admin final platform review.",
+              ]
+            );
+
+            await db.query(
+              `INSERT INTO notifications (recipient_type, recipient_id, title, message, type, link, is_read, created_at)
+               VALUES ('admin', NULL, ?, ?, 'kyc', '/admin/kyc', 0, NOW())`,
+              [
+                `Bank Approval Completed: ${mCode}`,
+                `Bank has completed review for ${mCode} and forwarded application ${details.application.application_number || applicationId} for your final decision.`,
+              ]
+            );
+          } else if (status === "rejected") {
+            await db.query(
+              `INSERT INTO notifications (recipient_type, recipient_id, title, message, type, link, is_read, created_at)
+               VALUES ('merchant', ?, ?, ?, 'kyc', '/merchant/dashboard', 0, NOW())`,
+              [
+                mUserId,
+                "Application Rejected by Bank",
+                `Your onboarding application was rejected by the banking partner. Reason: ${rejectionReason || reviewComment || "Compliance criteria not met"}`,
+              ]
+            );
+
+            await db.query(
+              `INSERT INTO notifications (recipient_type, recipient_id, title, message, type, link, is_read, created_at)
+               VALUES ('admin', NULL, ?, ?, 'kyc', '/admin/merchants', 0, NOW())`,
+              [
+                `Bank Rejected Application: ${mCode}`,
+                `Bank rejected application ${details.application.application_number || applicationId}. Reason: ${rejectionReason || reviewComment || "Not specified"}.`,
+              ]
+            );
+          }
+        }
+      }
+    } catch (notifErr) {
+      console.warn("Failed to create review decision notifications:", notifErr);
+    }
 
     return {
       success: true,
@@ -484,5 +571,34 @@ export const institutionService = {
       err.statusCode = 403;
       throw err;
     }
+  },
+
+  /**
+   * Get persistent notifications for an institution
+   */
+  async getNotifications(institutionId) {
+    const [rows] = await db.query(
+      `SELECT * FROM notifications 
+       WHERE (recipient_type = 'institution' AND institution_id = ?) 
+          OR (recipient_type = 'all')
+       ORDER BY created_at DESC 
+       LIMIT 50`,
+      [Number(institutionId)]
+    );
+    const unreadCount = rows.filter((r) => !r.is_read).length;
+    return { notifications: rows, unreadCount };
+  },
+
+  /**
+   * Mark notification as read
+   */
+  async markNotificationRead(id, institutionId) {
+    await db.query(
+      `UPDATE notifications 
+       SET is_read = 1 
+       WHERE id = ? AND (institution_id = ? OR recipient_type = 'all')`,
+      [Number(id), Number(institutionId)]
+    );
+    return { success: true };
   },
 };

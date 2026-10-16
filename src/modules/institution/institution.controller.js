@@ -293,5 +293,26 @@ export const institutionController = {
       next(err);
     }
   },
+
+  async getNotifications(req, res, next) {
+    try {
+      const institutionId = getTargetInstitutionId(req);
+      const data = await institutionService.getNotifications(institutionId);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async markNotificationRead(req, res, next) {
+    try {
+      const institutionId = getTargetInstitutionId(req);
+      const { id } = req.params;
+      const data = await institutionService.markNotificationRead(id, institutionId);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  },
 };
 

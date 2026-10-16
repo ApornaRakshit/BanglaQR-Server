@@ -45,5 +45,9 @@ router.post("/connections/:serviceId/test", requireInstitutionPermission("instit
 // Reports
 router.get("/reports", requireInstitutionPermission("institution.reports.view"), institutionController.getReports);
 
+// Notifications
+router.get("/notifications", institutionController.getNotifications);
+router.patch("/notifications/:id/read", institutionController.markNotificationRead);
+
 export default router;
 

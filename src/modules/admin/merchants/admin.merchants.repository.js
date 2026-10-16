@@ -167,6 +167,24 @@ export const adminMerchantsRepository = {
       JOIN gateways g ON g.id = mgs.gateway_id
       WHERE mgs.merchant_id = ?
     `, [merchantId]);
+    const [applications] = await db.execute(`
+      SELECT mga.*, 
+             COALESCE(i.name, mga.gateway_name) AS institution_name,
+             i.institution_code,
+             ib.branch_name,
+             ib.branch_code
+      FROM merchant_gateway_applications mga
+      LEFT JOIN institutions i ON i.id = mga.institution_id
+      LEFT JOIN institution_branches ib ON ib.id = mga.branch_id
+      WHERE mga.merchant_id = ?
+      ORDER BY mga.id DESC
+    `, [merchantId]);
+    const [versions] = await db.execute(`
+      SELECT id, version_no, submitted_at, change_summary, snapshot_data
+      FROM kyc_submission_versions
+      WHERE merchant_id = ?
+      ORDER BY version_no DESC
+    `, [merchantId]);
 
     return {
       merchant: {
@@ -270,6 +288,30 @@ export const adminMerchantsRepository = {
         resolutionNote: fi.resolution_note,
         createdAt: fi.created_at,
         updatedAt: fi.updated_at,
+      })),
+      applications: applications.map((app) => ({
+        id: app.id,
+        applicationNumber: app.application_number || `APP-${app.id}`,
+        applicationType: app.application_type,
+        gatewayId: app.gateway_id,
+        institutionId: app.institution_id,
+        institutionName: app.institution_name,
+        branchName: app.branch_name,
+        status: app.status,
+        reviewNote: app.review_note,
+        reviewComment: app.review_comment,
+        rejectionReason: app.rejection_reason,
+        appliedAt: app.applied_at,
+        reviewedAt: app.reviewed_at,
+        approvedAt: app.approved_at,
+        createdAt: app.created_at,
+      })),
+      versions: versions.map((v) => ({
+        id: v.id,
+        versionNo: v.version_no,
+        submittedAt: v.submitted_at,
+        changeSummary: v.change_summary,
+        snapshotData: typeof v.snapshot_data === "string" ? JSON.parse(v.snapshot_data) : v.snapshot_data,
       })),
     };
   },

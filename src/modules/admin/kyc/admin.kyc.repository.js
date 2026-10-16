@@ -63,10 +63,16 @@ export const adminKycRepository = {
           k.tin,
           k.nid_number,
           k.authorized_person_name,
-          k.bank_name,
+          COALESCE(i.name, latest_app.gateway_name, k.bank_name) AS bank_name,
           k.bank_account_name,
           k.bank_account_number,
           k.account_type,
+          latest_app.id AS application_id,
+          latest_app.status AS application_status,
+          latest_app.application_number,
+          latest_app.institution_id,
+          i.name AS institution_name,
+          ib.branch_name,
           COALESCE(p.company_name, k.legal_business_name, 'Pending Setup') AS company_name,
           (SELECT COUNT(*) FROM merchant_documents md WHERE md.merchant_id = m.id) AS document_count,
           (SELECT COUNT(*) FROM merchant_documents md WHERE md.merchant_id = m.id AND md.status = 'Approved') AS approved_document_count
@@ -74,6 +80,18 @@ export const adminKycRepository = {
         JOIN users u ON m.user_id = u.id
         LEFT JOIN merchant_kyc k ON k.merchant_id = m.id
         LEFT JOIN merchant_profiles p ON p.merchant_id = m.id
+        LEFT JOIN (
+          SELECT mga1.*
+          FROM merchant_gateway_applications mga1
+          INNER JOIN (
+            SELECT merchant_id, MAX(id) AS max_id
+            FROM merchant_gateway_applications
+            WHERE application_type = 'onboarding_kyc'
+            GROUP BY merchant_id
+          ) latest ON mga1.id = latest.max_id
+        ) latest_app ON latest_app.merchant_id = m.id
+        LEFT JOIN institutions i ON i.id = latest_app.institution_id
+        LEFT JOIN institution_branches ib ON ib.id = latest_app.branch_id
         ${whereClause}
         ORDER BY m.submitted_at DESC, m.created_at DESC
         LIMIT ? OFFSET ?
@@ -85,6 +103,12 @@ export const adminKycRepository = {
       items: rows.map((r) => ({
         merchantId: r.merchant_id,
         merchantCode: r.merchant_code,
+        applicationId: r.application_id || null,
+        applicationNumber: r.application_number || (r.application_id ? `APP-${r.application_id}` : null),
+        applicationStatus: r.application_status || null,
+        institutionId: r.institution_id || null,
+        institutionName: r.institution_name || r.bank_name || null,
+        branchName: r.branch_name || null,
         companyName: r.company_name,
         legalBusinessName: r.legal_business_name,
         businessEntityType: r.business_entity_type,

@@ -6,7 +6,7 @@ export async function requireAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
     const bearerToken = authHeader && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    const token = req.signedCookies?.bq_access || bearerToken;
+    const token = req.signedCookies?.bq_access || bearerToken || req.query?.token;
 
     if (!token) {
       return res.status(401).json({

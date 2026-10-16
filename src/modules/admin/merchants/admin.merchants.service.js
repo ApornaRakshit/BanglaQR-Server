@@ -112,6 +112,15 @@ export const adminMerchantsService = {
           [comment || "Application approved by compliance officer", merchantId]
         );
 
+        // Update the merchant's onboarding application to approved
+        await conn.execute(
+          `UPDATE merchant_gateway_applications 
+           SET status = 'approved', approved_at = NOW(), reviewed_at = NOW(), updated_at = NOW(),
+               review_comment = COALESCE(review_comment, ?)
+           WHERE merchant_id = ? AND application_type = 'onboarding_kyc' AND status != 'approved'`,
+          [comment || "Final platform approval granted by Admin", merchantId]
+        );
+
         // Provision default BanglaQR Interoperable Gateway service if not existing
         const [existingServices] = await conn.execute(
           "SELECT id FROM merchant_gateway_services WHERE merchant_id = ?",
@@ -141,6 +150,14 @@ export const adminMerchantsService = {
           `UPDATE merchants SET account_status = 'rejected', kyc_status = 'rejected', rejected_at = NOW(), rejection_reason = ?, admin_comments = ?, updated_at = NOW() WHERE id = ?`,
           [reason || "Compliance mismatch", comment || reason, merchantId]
         );
+
+        // Update the merchant's onboarding application to rejected
+        await conn.execute(
+          `UPDATE merchant_gateway_applications 
+           SET status = 'rejected', rejection_reason = ?, review_comment = ?, reviewed_at = NOW(), updated_at = NOW()
+           WHERE merchant_id = ? AND application_type = 'onboarding_kyc'`,
+          [reason || "Compliance mismatch", comment || reason, merchantId]
+        );
       } else if (action === "request_information" || action === "request_info") {
         newAccountStatus = "additional_information_required";
         newKycStatus = "additional_information_required";
@@ -156,6 +173,14 @@ export const adminMerchantsService = {
             }),
             merchantId,
           ]
+        );
+
+        // Update the merchant's onboarding application to additional_information_required
+        await conn.execute(
+          `UPDATE merchant_gateway_applications 
+           SET status = 'additional_information_required', review_comment = ?, updated_at = NOW()
+           WHERE merchant_id = ? AND application_type = 'onboarding_kyc'`,
+          [comment || reason || "Additional information requested by Admin", merchantId]
         );
 
         // Also record individual field issues in kyc_field_issues so merchant UI flags them precisely
@@ -267,6 +292,31 @@ export const adminMerchantsService = {
           comment || `Your merchant onboarding application status has been updated to ${newAccountStatus}.`,
         ]
       );
+
+      // Notify the relevant Partner Bank/MFS if application is associated with an institution
+      const [appRows] = await conn.execute(
+        `SELECT id, institution_id, gateway_name FROM merchant_gateway_applications 
+         WHERE merchant_id = ? AND application_type = 'onboarding_kyc' ORDER BY id DESC LIMIT 1`,
+        [merchantId]
+      );
+      if (appRows.length > 0 && appRows[0].institution_id) {
+        const instId = appRows[0].institution_id;
+        const [profRows] = await conn.execute(
+          `SELECT company_name FROM merchant_profiles WHERE merchant_id = ? LIMIT 1`,
+          [merchantId]
+        );
+        const compName = profRows[0]?.company_name || merchant.merchant_code;
+
+        await conn.execute(
+          `INSERT INTO notifications (recipient_type, recipient_id, institution_id, title, message, type, link, is_read, created_at)
+           VALUES ('institution', NULL, ?, ?, ?, 'kyc', '/institution/applications', 0, NOW())`,
+          [
+            instId,
+            `Admin Final Review: ${newAccountStatus.toUpperCase()}`,
+            `Platform Admin finalized review for merchant ${compName} (${merchant.merchant_code}) with decision: ${newAccountStatus}.`,
+          ]
+        );
+      }
 
       await conn.commit();
 

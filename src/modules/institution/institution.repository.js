@@ -104,7 +104,7 @@ export const institutionRepository = {
       JOIN merchants m ON m.id = mga.merchant_id
       WHERE mga.institution_id = ? 
         AND mga.status = 'approved'
-        AND m.account_status = 'active'
+        AND m.account_status IN ('approved', 'active')
       `,
       [instId]
     );
@@ -431,6 +431,49 @@ export const institutionRepository = {
       [application.merchant_id, Number(institutionId)]
     );
 
+    // Fetch Merchant Profile
+    const [profileRows] = await db.query(
+      `SELECT * FROM merchant_profiles WHERE merchant_id = ? LIMIT 1`,
+      [application.merchant_id]
+    );
+    const profile = profileRows[0] || null;
+
+    // Fetch Merchant Contact
+    const [contactRows] = await db.query(
+      `SELECT * FROM merchant_contacts WHERE merchant_id = ? LIMIT 1`,
+      [application.merchant_id]
+    );
+    const contact = contactRows[0] || null;
+
+    // Fetch Merchant Commercial Details
+    const [commercialRows] = await db.query(
+      `SELECT * FROM merchant_commercial_details WHERE merchant_id = ? LIMIT 1`,
+      [application.merchant_id]
+    );
+    const commercial = commercialRows[0] || null;
+
+    // Fetch Merchant Services
+    const [serviceRows] = await db.query(
+      `
+      SELECT mgs.*, g.name AS gateway_name, g.code AS gateway_code, g.service_fee
+      FROM merchant_gateway_services mgs
+      JOIN gateways g ON g.id = mgs.gateway_id
+      WHERE mgs.merchant_id = ?
+      `,
+      [application.merchant_id]
+    );
+
+    // Fetch Onboarding History
+    const [historyRows] = await db.query(
+      `
+      SELECT *
+      FROM merchant_onboarding_history
+      WHERE merchant_id = ?
+      ORDER BY id DESC
+      `,
+      [application.merchant_id]
+    );
+
     // Fetch submission versions
     const [versions] = await db.query(
       `
@@ -444,10 +487,15 @@ export const institutionRepository = {
 
     return {
       application,
+      profile,
+      contact,
+      commercial,
       kyc,
       documents: docRows,
       fieldIssues,
       versions,
+      services: serviceRows,
+      history: historyRows,
     };
   },
 

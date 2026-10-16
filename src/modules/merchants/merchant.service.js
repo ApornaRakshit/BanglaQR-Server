@@ -660,8 +660,8 @@ export const merchantService = {
         if (existingApps.length === 0) {
           await db.query(
             `INSERT INTO merchant_gateway_applications
-             (application_number, merchant_id, institution_id, branch_id, status, gateway_name, applied_at)
-             VALUES (?, ?, ?, ?, 'applied', ?, NOW())`,
+             (application_number, application_type, merchant_id, institution_id, branch_id, status, gateway_name, applied_at)
+             VALUES (?, 'onboarding_kyc', ?, ?, ?, 'applied', ?, NOW())`,
             [
               `APP-${Date.now().toString().slice(-6)}`,
               merchant.id,
@@ -673,11 +673,22 @@ export const merchantService = {
         } else {
           await db.query(
             `UPDATE merchant_gateway_applications
-             SET status = 'applied', branch_id = COALESCE(?, branch_id), updated_at = NOW()
+             SET status = 'applied', application_type = 'onboarding_kyc', branch_id = COALESCE(?, branch_id), updated_at = NOW()
              WHERE id = ?`,
             [kyc?.branch_id || null, existingApps[0].id]
           );
         }
+
+        // Insert persistent notification for the institution
+        await db.query(
+          `INSERT INTO notifications (recipient_type, recipient_id, institution_id, title, message, type, link, is_read, created_at)
+           VALUES ('institution', NULL, ?, ?, ?, 'kyc', '/institution/applications', 0, NOW())`,
+          [
+            Number(bankInstId),
+            `New Merchant Application: ${company}`,
+            `Merchant ${company} (${merchant.merchant_code}) has submitted their onboarding application for KYC compliance review.`,
+          ]
+        );
 
         // Write to institution activity log so Bank Admin sees it in recent activities & notifications
         await db.query(
@@ -746,6 +757,91 @@ export const merchantService = {
       return { success: true, message: "No open issues found to resolve." };
     }
 
+    // Verify that any document issues have actually been re-uploaded after the issue was raised
+    const [existingDocs] = await db.query(
+      `SELECT document_type, uploaded_at, created_at, updated_at FROM merchant_documents WHERE merchant_id = ?`,
+      [merchant.id]
+    );
+
+    const docTypeMap = {
+      nid_front: "NID_FRONT",
+      nid_back: "NID_BACK",
+      tin_certificate: "TIN_CERTIFICATE",
+      tin: "TIN_CERTIFICATE",
+      cancelled_bank_cheque: "CANCELLED_BANK_CHEQUE",
+      cheque: "CANCELLED_BANK_CHEQUE",
+      trade_license: "TRADE_LICENSE",
+      bin_certificate: "BIN_CERTIFICATE",
+      bin: "BIN_CERTIFICATE",
+    };
+
+    const docKeywords = [
+      "nid_front",
+      "nid_back",
+      "tin_certificate",
+      "cancelled_bank_cheque",
+      "trade_license",
+      "bin_certificate",
+      "document",
+      "image",
+      "photo",
+      "file",
+      "scan",
+    ];
+
+    for (const issue of targetIssues) {
+      const fieldKeyLower = String(issue.field_key || "").toLowerCase();
+      const reasonLower = String(issue.issue_reason || "").toLowerCase();
+
+      // Check if this issue is for a document
+      const isDocumentIssue =
+        docKeywords.some((k) => fieldKeyLower.includes(k)) ||
+        reasonLower.includes("image") ||
+        reasonLower.includes("document") ||
+        reasonLower.includes("clear nid") ||
+        reasonLower.includes("scan");
+
+      if (isDocumentIssue) {
+        // Find which document type this refers to
+        let targetDocType = null;
+        if (fieldKeyLower.includes("nid_front") || (reasonLower.includes("nid") && reasonLower.includes("front"))) {
+          targetDocType = "NID_FRONT";
+        } else if (fieldKeyLower.includes("nid_back") || (reasonLower.includes("nid") && reasonLower.includes("back"))) {
+          targetDocType = "NID_BACK";
+        } else if (fieldKeyLower.includes("nid") || reasonLower.includes("nid")) {
+          targetDocType = "NID_FRONT";
+        } else if (fieldKeyLower.includes("tin") || reasonLower.includes("tin")) {
+          targetDocType = "TIN_CERTIFICATE";
+        } else if (fieldKeyLower.includes("cheque") || reasonLower.includes("cheque")) {
+          targetDocType = "CANCELLED_BANK_CHEQUE";
+        } else if (fieldKeyLower.includes("trade_license") || reasonLower.includes("trade license")) {
+          targetDocType = "TRADE_LICENSE";
+        } else if (fieldKeyLower.includes("bin") || reasonLower.includes("bin")) {
+          targetDocType = "BIN_CERTIFICATE";
+        }
+
+        if (targetDocType) {
+          const matchedDoc = existingDocs.find(
+            (d) => String(d.document_type || "").toUpperCase() === targetDocType
+          );
+
+          const issueDate = new Date(issue.created_at).getTime();
+          const docDate = matchedDoc
+            ? new Date(matchedDoc.updated_at || matchedDoc.uploaded_at || matchedDoc.created_at).getTime()
+            : 0;
+
+          // If document was not uploaded or updated after the issue was raised
+          if (!matchedDoc || docDate <= issueDate) {
+            const error = new Error(
+              `Please re-upload a clear and valid document for "${targetDocType.replace(/_/g, " ")}" before resubmitting.`
+            );
+            error.statusCode = 400;
+            throw error;
+          }
+        }
+      }
+    }
+
     for (const issue of targetIssues) {
       await db.query(
         `UPDATE kyc_field_issues
@@ -793,7 +889,7 @@ export const merchantService = {
       [newStatus, merchant.id]
     );
 
-    // Notify Platform Admin
+    // Notify Platform Admin & Institution
     try {
       const company = profile?.company_name || merchant.merchant_code;
       await merchantRepository.createAdminNotification(
@@ -802,6 +898,20 @@ export const merchantService = {
         "kyc",
         `/admin/kyc`
       );
+
+      // Also create persistent notification for the institution if associated
+      const instId = kyc?.institution_id || targetIssues[0]?.institution_id || null;
+      if (instId) {
+        await db.query(
+          `INSERT INTO notifications (recipient_type, recipient_id, institution_id, title, message, type, link, is_read, created_at)
+           VALUES ('institution', NULL, ?, ?, ?, 'kyc', '/institution/applications', 0, NOW())`,
+          [
+            Number(instId),
+            `Correction Resubmitted: ${company}`,
+            `Merchant ${company} (${merchant.merchant_code}) has updated flagged fields and resubmitted their application for review.`,
+          ]
+        );
+      }
     } catch (_) {}
 
     return {
