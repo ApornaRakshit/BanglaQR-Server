@@ -1,0 +1,49 @@
+
+# ==========================================
+# ENVIRONMENT & SECRETS
+# ==========================================
+/.env
+/.env.*
+!/.env.example
+
+# ==========================================
+# DEPENDENCIES & BUILD FILES
+# ==========================================
+/node_modules/
+/dist/
+/coverage/
+
+# ==========================================
+# LOGS
+# ==========================================
+*.log
+/logs/
+
+# ==========================================
+# UPLOADS & PRIVATE DOCUMENTS
+# ==========================================
+/public/uploads/
+/uploads/
+/storage/secure_documents/
+
+# ==========================================
+# PRIVATE DATABASE BACKUPS
+# ==========================================
+/backups/
+*.bundle
+
+# Never commit local database export
+/database/banglaqrDB.sql
+
+# Local server archive
+/server.zip
+
+# ==========================================
+# EDITOR & OS FILES
+# ==========================================
+.vscode/
+.idea/
+.DS_Store
+# Ignore ZIP and backup archives
+*.zip
+*.bundle

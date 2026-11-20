@@ -1,0 +1,458 @@
+[
+  {
+    "id": "bank-logo-1",
+    "name": "AB Bank",
+    "filename": "ABBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 1
+  },
+  {
+    "id": "bank-logo-2",
+    "name": "Agrani Bank",
+    "filename": "agraniBank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 2
+  },
+  {
+    "id": "bank-logo-3",
+    "name": "Al-Arafah Islami Bank",
+    "filename": "aibBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 3
+  },
+  {
+    "id": "bank-logo-4",
+    "name": "Bank Alfalah",
+    "filename": "alfalahBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 4
+  },
+  {
+    "id": "bank-logo-5",
+    "name": "Bangladesh Krishi Bank",
+    "filename": "bangladeshkrishibank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 5
+  },
+  {
+    "id": "bank-logo-6",
+    "name": "Bank Asia",
+    "filename": "bank_asia.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 6
+  },
+  {
+    "id": "bank-logo-7",
+    "name": "BASIC Bank",
+    "filename": "basic-bank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 7
+  },
+  {
+    "id": "bank-logo-8",
+    "name": "Bangladesh Commerce Bank",
+    "filename": "BCBBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 8
+  },
+  {
+    "id": "bank-logo-9",
+    "name": "BDBL",
+    "filename": "BDBL.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 9
+  },
+  {
+    "id": "bank-logo-10",
+    "name": "Bengal Commercial Bank",
+    "filename": "bengalCommercialBank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 10
+  },
+  {
+    "id": "bank-logo-11",
+    "name": "bKash",
+    "filename": "bkash.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 11
+  },
+  {
+    "id": "bank-logo-12",
+    "name": "BRAC Bank",
+    "filename": "bracbank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 12
+  },
+  {
+    "id": "bank-logo-13",
+    "name": "Citibank N.A.",
+    "filename": "citibank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 13
+  },
+  {
+    "id": "bank-logo-14",
+    "name": "Citizens Bank",
+    "filename": "citizenbank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 14
+  },
+  {
+    "id": "bank-logo-15",
+    "name": "City Bank",
+    "filename": "citybank.ico",
+    "isImage": true,
+    "isActive": true,
+    "order": 15
+  },
+  {
+    "id": "bank-logo-16",
+    "name": "Commercial Bank of Ceylon",
+    "filename": "commercialBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 16
+  },
+  {
+    "id": "bank-logo-17",
+    "name": "Community Bank",
+    "filename": "communitybank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 17
+  },
+  {
+    "id": "bank-logo-18",
+    "name": "Dhaka Bank",
+    "filename": "dhakabank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 18
+  },
+  {
+    "id": "bank-logo-19",
+    "name": "Dutch-Bangla Bank",
+    "filename": "DutchBank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 19
+  },
+  {
+    "id": "bank-logo-20",
+    "name": "Eastern Bank",
+    "filename": "EBL.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 20
+  },
+  {
+    "id": "bank-logo-21",
+    "name": "Grameen Bank",
+    "filename": "grameenBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 21
+  },
+  {
+    "id": "bank-logo-22",
+    "name": "IFIC Bank",
+    "filename": "IFIC-Logo.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 22
+  },
+  {
+    "id": "bank-logo-23",
+    "name": "Jamuna Bank",
+    "filename": "jamunabank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 23
+  },
+  {
+    "id": "bank-logo-24",
+    "name": "Janata Bank",
+    "filename": "jblogo.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 24
+  },
+  {
+    "id": "bank-logo-25",
+    "name": "Madhumoti Bank",
+    "filename": "madhumotibank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 25
+  },
+  {
+    "id": "bank-logo-26",
+    "name": "Meghna Bank",
+    "filename": "meghnabank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 26
+  },
+  {
+    "id": "bank-logo-27",
+    "name": "Mercantile Bank",
+    "filename": "mercantilebank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 27
+  },
+  {
+    "id": "bank-logo-28",
+    "name": "Midland Bank",
+    "filename": "midlandbank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 28
+  },
+  {
+    "id": "bank-logo-29",
+    "name": "Mutual Trust Bank",
+    "filename": "mutualtrustbank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 29
+  },
+  {
+    "id": "bank-logo-30",
+    "name": "Nagad",
+    "filename": "nagad.webp",
+    "isImage": true,
+    "isActive": true,
+    "order": 30
+  },
+  {
+    "id": "bank-logo-31",
+    "name": "National Bank",
+    "filename": "nationalbank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 31
+  },
+  {
+    "id": "bank-logo-32",
+    "name": "NCC Bank",
+    "filename": "NCCBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 32
+  },
+  {
+    "id": "bank-logo-33",
+    "name": "NRB Bank",
+    "filename": "NRBBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 33
+  },
+  {
+    "id": "bank-logo-34",
+    "name": "NRBC Bank",
+    "filename": "NRBCBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 34
+  },
+  {
+    "id": "bank-logo-35",
+    "name": "One Bank",
+    "filename": "OneBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 35
+  },
+  {
+    "id": "bank-logo-36",
+    "name": "Padma Bank",
+    "filename": "padma.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 36
+  },
+  {
+    "id": "bank-logo-37",
+    "name": "Premier Bank",
+    "filename": "premierbank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 37
+  },
+  {
+    "id": "bank-logo-38",
+    "name": "Prime Bank",
+    "filename": "primeBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 38
+  },
+  {
+    "id": "bank-logo-39",
+    "name": "Probashi Kallyan Bank",
+    "filename": "Probashi_Kallyan_Bank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 39
+  },
+  {
+    "id": "bank-logo-40",
+    "name": "Pubali Bank",
+    "filename": "pubali.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 40
+  },
+  {
+    "id": "bank-logo-41",
+    "name": "Rajshahi Krishi Unnayan Bank",
+    "filename": "rajshahikrishibank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 41
+  },
+  {
+    "id": "bank-logo-42",
+    "name": "Rocket",
+    "filename": "rocket.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 42
+  },
+  {
+    "id": "bank-logo-43",
+    "name": "Rupali Bank",
+    "filename": "rupalibank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 43
+  },
+  {
+    "id": "bank-logo-44",
+    "name": "Sammilito Islami Bank",
+    "filename": "sammilito-islamibank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 44
+  },
+  {
+    "id": "bank-logo-45",
+    "name": "SBAC Bank",
+    "filename": "SBACBank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 45
+  },
+  {
+    "id": "bank-logo-46",
+    "name": "Shimanto Bank",
+    "filename": "ShimantoBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 46
+  },
+  {
+    "id": "bank-logo-47",
+    "name": "Social Islami Bank",
+    "filename": "SIBLBank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 47
+  },
+  {
+    "id": "bank-logo-48",
+    "name": "Sonali Bank",
+    "filename": "sonali-bank-logo.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 48
+  },
+  {
+    "id": "bank-logo-49",
+    "name": "Sonali Bank PLC",
+    "filename": "sonalibank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 49
+  },
+  {
+    "id": "bank-logo-50",
+    "name": "Southeast Bank",
+    "filename": "Southeastbank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 50
+  },
+  {
+    "id": "bank-logo-51",
+    "name": "Standard Bank",
+    "filename": "standardBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 51
+  },
+  {
+    "id": "bank-logo-52",
+    "name": "Trust Bank",
+    "filename": "trustbank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 52
+  },
+  {
+    "id": "bank-logo-53",
+    "name": "UCB Bank",
+    "filename": "UCBBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 53
+  },
+  {
+    "id": "bank-logo-54",
+    "name": "Union Bank",
+    "filename": "unionBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 54
+  },
+  {
+    "id": "bank-logo-55",
+    "name": "upay",
+    "filename": "upay.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 55
+  },
+  {
+    "id": "bank-logo-56",
+    "name": "Uttara Bank",
+    "filename": "uttaraBank.png",
+    "isImage": true,
+    "isActive": true,
+    "order": 56
+  },
+  {
+    "id": "bank-logo-57",
+    "name": "Woori Bank",
+    "filename": "wooribank.jpg",
+    "isImage": true,
+    "isActive": true,
+    "order": 57
+  }
+]
