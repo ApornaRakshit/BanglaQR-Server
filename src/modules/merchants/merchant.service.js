@@ -9,6 +9,7 @@ import { adminMerchantsRepository } from "../admin/merchants/admin.merchants.rep
 import { emailService } from "../../services/email.service.js";
 import { hashPassword, verifyPassword } from "../../utils/password.js";
 import crypto from "crypto";
+import { adminSettingsRepository } from "../admin/settings/admin.settings.module.js";
 
 
 // Only draft/rejected applications may be edited freely. Once submitted, merchant data
@@ -599,6 +600,16 @@ export const merchantService = {
       isApproved: merchant.account_status === "approved" || merchant.account_status === "active",
       customValues: customValMap,
       institution: selectedInstitution,
+      allowMerchantDelete: await (async () => {
+        try {
+          const general = await adminSettingsRepository.getSettingValue("platform_general", {});
+          if (general.allowMerchantDelete === false) return false;
+          const scope = general.merchantDeleteScope || "both";
+          return scope === "both" || scope === "merchant_only";
+        } catch (_) {
+          return true;
+        }
+      })(),
     };
   },
 
@@ -2614,7 +2625,7 @@ function toSnakeCaseKey(str) {
         `Merchant Re-submitted Correction: ${company}`,
         `Merchant ${company} (${merchant.merchant_code}) has updated and re-submitted their correction for review.`,
         "kyc",
-        `/admin/kyc`
+        `/admin/merchants/${merchant.id}?tab=overview#resubmitted-table`
       );
 
       // Also create persistent notification for the institution if associated
@@ -2622,7 +2633,7 @@ function toSnakeCaseKey(str) {
       if (instId) {
         await db.query(
           `INSERT INTO notifications (recipient_type, recipient_id, institution_id, title, message, type, link, is_read, created_at)
-           VALUES ('institution', NULL, ?, ?, ?, 'kyc', '/institution/kyc-review', 0, NOW())`,
+           VALUES ('institution', NULL, ?, ?, ?, 'kyc', '/institution/applications/${merchant.id}', 0, NOW())`,
           [
             Number(instId),
             `Correction Resubmitted: ${company}`,
@@ -3403,6 +3414,70 @@ function toSnakeCaseKey(str) {
       [userId]
     );
     return { success: true };
+  },
+
+  async deleteNotification(userId, notifId) {
+    const general = await adminSettingsRepository.getSettingValue("platform_general", {});
+    const scope = general.merchantDeleteScope || "both";
+    if (general.allowMerchantDelete === false || scope === "admin_only") {
+      const err = new Error("মার্চেন্ট সাইড থেকে ডিলিট করার অনুমতি বর্তমানে নিষ্ক্রিয় আছে।");
+      err.statusCode = 403;
+      throw err;
+    }
+    await db.execute(
+      `DELETE FROM notifications
+       WHERE id = ? AND ((recipient_type = 'merchant' AND recipient_id = ?) OR recipient_type = 'all')`,
+      [notifId, userId]
+    );
+    return { success: true, message: "Notification deleted successfully" };
+  },
+
+  async deleteAllNotifications(userId) {
+    const general = await adminSettingsRepository.getSettingValue("platform_general", {});
+    const scope = general.merchantDeleteScope || "both";
+    if (general.allowMerchantDelete === false || scope === "admin_only") {
+      const err = new Error("মার্চেন্ট সাইড থেকে ডিলিট করার অনুমতি বর্তমানে নিষ্ক্রিয় আছে।");
+      err.statusCode = 403;
+      throw err;
+    }
+    await db.execute(
+      `DELETE FROM notifications
+       WHERE ((recipient_type = 'merchant' AND recipient_id = ?) OR recipient_type = 'all')`,
+      [userId]
+    );
+    return { success: true, message: "All notifications deleted successfully" };
+  },
+
+  async deleteResubmitIssue(userId, issueId) {
+    const general = await adminSettingsRepository.getSettingValue("platform_general", {});
+    const scope = general.merchantDeleteScope || "both";
+    if (general.allowMerchantDelete === false || scope === "admin_only") {
+      const err = new Error("মার্চেন্ট সাইড থেকে ডিলিট করার অনুমতি বর্তমানে নিষ্ক্রিয় আছে।");
+      err.statusCode = 403;
+      throw err;
+    }
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    await db.execute(
+      `DELETE FROM kyc_field_issues WHERE id = ? AND merchant_id = ?`,
+      [issueId, merchant.id]
+    );
+    return { success: true, message: "Resubmit issue record deleted successfully" };
+  },
+
+  async clearAllResubmitIssues(userId) {
+    const general = await adminSettingsRepository.getSettingValue("platform_general", {});
+    const scope = general.merchantDeleteScope || "both";
+    if (general.allowMerchantDelete === false || scope === "admin_only") {
+      const err = new Error("মার্চেন্ট সাইড থেকে ডিলিট করার অনুমতি বর্তমানে নিষ্ক্রিয় আছে।");
+      err.statusCode = 403;
+      throw err;
+    }
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    await db.execute(
+      `DELETE FROM kyc_field_issues WHERE merchant_id = ?`,
+      [merchant.id]
+    );
+    return { success: true, message: "All resubmit records cleared successfully" };
   },
 
   // ==========================================

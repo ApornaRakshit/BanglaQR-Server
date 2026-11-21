@@ -1395,12 +1395,16 @@ export const institutionService = {
         [merchantId]
       );
 
+      // Fetch institution name
+      const [instRows] = await conn.execute(`SELECT name FROM institutions WHERE id = ?`, [institutionId]);
+      const instName = instRows[0]?.name || "Bank / MFS Partner";
+
       // Insert new MERCHANT_QR document
       const [docResult] = await conn.execute(
         `INSERT INTO merchant_documents (
           merchant_id, document_type, document_name, original_filename, stored_filename,
-          storage_key, mime_type, file_size, status, uploaded_at, created_at, updated_at, custom_label
-        ) VALUES (?, 'MERCHANT_QR', 'Merchant Bangla QR', ?, ?, ?, ?, ?, 'Approved', NOW(), NOW(), NOW(), 'অফিসিয়াল বাংলা কিউআর (Official Bangla QR)')`,
+          storage_key, mime_type, file_size, status, uploaded_at, created_at, updated_at, custom_label, review_comment
+        ) VALUES (?, 'MERCHANT_QR', 'Merchant Bangla QR', ?, ?, ?, ?, ?, 'Approved', NOW(), NOW(), NOW(), 'অফিসিয়াল বাংলা কিউআর (Official Bangla QR)', ?)`,
         [
           merchantId,
           originalName,
@@ -1408,6 +1412,7 @@ export const institutionService = {
           saved.storageKey,
           mime,
           size,
+          `Provided by ${instName}`,
         ]
       );
 
@@ -1427,6 +1432,21 @@ export const institutionService = {
          WHERE merchant_id = ?`,
         [qrUrl, merchantId]
       );
+
+      // Send notification to merchant with the institution name
+      const [userRows] = await conn.execute(`SELECT user_id FROM merchants WHERE id = ?`, [merchantId]);
+      if (userRows[0]?.user_id) {
+        await conn.execute(
+          `INSERT INTO notifications (
+            recipient_id, institution_id, recipient_type, title, message, type, link, is_read, created_at
+          ) VALUES (?, NULL, 'merchant', ?, ?, 'merchant_update', '/merchant/services/amar-bangla-qr', 0, NOW())`,
+          [
+            userRows[0].user_id,
+            "বাংলা কিউআর (Bangla QR) প্রদান করা হয়েছে",
+            `${instName} এর পক্ষ থেকে আপনার অফিসিয়াল বাংলা কিউআর (Bangla QR) প্রদান করা হয়েছে। আমার বাংলা কিউআর মেনু থেকে কিউআর ডাউনলোড বা ব্যবহার করতে পারবেন।`,
+          ]
+        );
+      }
 
       await conn.commit();
 

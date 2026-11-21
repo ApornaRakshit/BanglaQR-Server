@@ -26,8 +26,12 @@ export const adminMerchantsRepository = {
     }
 
     if (status && status !== "all") {
-      conditions.push("m.account_status = ?");
-      params.push(status);
+      if (status === "approved") {
+        conditions.push("m.account_status IN ('approved', 'active')");
+      } else {
+        conditions.push("m.account_status = ?");
+        params.push(status);
+      }
     }
 
     if (kycStatus && kycStatus !== "all") {
@@ -180,8 +184,12 @@ export const adminMerchantsRepository = {
     }
 
     if (status && status !== "all") {
-      conditions.push("m.account_status = ?");
-      params.push(status);
+      if (status === "approved") {
+        conditions.push("m.account_status IN ('approved', 'active')");
+      } else {
+        conditions.push("m.account_status = ?");
+        params.push(status);
+      }
     }
 
     if (kycStatus && kycStatus !== "all") {

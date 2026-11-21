@@ -360,6 +360,44 @@ export const merchantController = {
     }
   },
 
+  async deleteNotification(req, res, next) {
+    try {
+      const id = Number(req.params.id);
+      const result = await merchantService.deleteNotification(req.user.id, id);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async deleteAllNotifications(req, res, next) {
+    try {
+      const result = await merchantService.deleteAllNotifications(req.user.id);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async deleteResubmitIssue(req, res, next) {
+    try {
+      const id = Number(req.params.id);
+      const result = await merchantService.deleteResubmitIssue(req.user.id, id);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async clearAllResubmitIssues(req, res, next) {
+    try {
+      const result = await merchantService.clearAllResubmitIssues(req.user.id);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
   // --- Support Tickets ---
   async getSupportTickets(req, res, next) {
     try {

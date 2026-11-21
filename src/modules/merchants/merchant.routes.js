@@ -107,6 +107,12 @@ router.get("/me/notifications", merchantController.getNotifications);
 router.get("/me/notifications/unread-count", merchantController.getUnreadNotificationCount);
 router.patch("/me/notifications/:id/read", merchantController.markNotificationRead);
 router.patch("/me/notifications/read-all", merchantController.markAllNotificationsRead);
+router.delete("/me/notifications/:id", merchantController.deleteNotification);
+router.delete("/me/notifications", merchantController.deleteAllNotifications);
+
+// --- Resubmit Issues ---
+router.delete("/me/resubmit-issues/:id", merchantController.deleteResubmitIssue);
+router.delete("/me/resubmit-issues", merchantController.clearAllResubmitIssues);
 
 // --- Support Tickets ---
 router.get("/me/support", merchantController.getSupportTickets);

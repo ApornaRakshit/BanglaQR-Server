@@ -26,7 +26,7 @@ const reviewMerchantSchema = z.object({
   ]),
   reason: z.string().optional(),
   comment: z.string().optional(),
-  requiredItems: z.array(z.string()).optional(),
+  requiredItems: z.array(z.any()).optional(),
 });
 
 const createMerchantSchema = z.object({
@@ -94,6 +94,42 @@ export const adminMerchantsController = {
         adminUser: req.user,
         ip: req.ip,
         userAgent: req.get("user-agent"),
+      });
+
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async resolveIssue(req, res, next) {
+    try {
+      const merchantId = Number(req.params.merchantId);
+      const issueId = Number(req.params.issueId);
+      const { note = "Approved by compliance" } = req.body;
+
+      const result = await adminMerchantsService.resolveKycIssue({
+        merchantId,
+        issueId,
+        note,
+        adminUser: req.user,
+      });
+
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async deleteIssue(req, res, next) {
+    try {
+      const merchantId = Number(req.params.merchantId);
+      const issueId = Number(req.params.issueId);
+
+      const result = await adminMerchantsService.deleteKycIssue({
+        merchantId,
+        issueId,
+        adminUser: req.user,
       });
 
       res.json(result);

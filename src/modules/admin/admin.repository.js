@@ -21,7 +21,7 @@ export const adminRepository = {
         COALESCE(SUM(CASE WHEN YEAR(created_at) = YEAR(CURDATE()) AND MONTH(created_at) = MONTH(CURDATE()) THEN 1 ELSE 0 END), 0) AS thisMonthRegistrations,
         COALESCE(SUM(CASE WHEN account_status = 'submitted' THEN 1 ELSE 0 END), 0) AS pendingReview,
         COALESCE(SUM(CASE WHEN account_status = 'under_review' THEN 1 ELSE 0 END), 0) AS underReview,
-        COALESCE(SUM(CASE WHEN account_status = 'approved' THEN 1 ELSE 0 END), 0) AS approved,
+        COALESCE(SUM(CASE WHEN account_status IN ('approved', 'active') THEN 1 ELSE 0 END), 0) AS approved,
         COALESCE(SUM(CASE WHEN account_status = 'rejected' THEN 1 ELSE 0 END), 0) AS rejected,
         COALESCE(SUM(CASE WHEN kyc_status = 'pending' THEN 1 ELSE 0 END), 0) AS kycPending,
         COALESCE(SUM(CASE WHEN account_status = 'additional_information_required' THEN 1 ELSE 0 END), 0) AS additionalInformationRequired,
@@ -34,7 +34,7 @@ export const adminRepository = {
         COUNT(*) AS periodTotal,
         COALESCE(SUM(CASE WHEN account_status = 'submitted' THEN 1 ELSE 0 END), 0) AS periodPendingReview,
         COALESCE(SUM(CASE WHEN account_status = 'under_review' THEN 1 ELSE 0 END), 0) AS periodUnderReview,
-        COALESCE(SUM(CASE WHEN account_status = 'approved' THEN 1 ELSE 0 END), 0) AS periodApproved,
+        COALESCE(SUM(CASE WHEN account_status IN ('approved', 'active') THEN 1 ELSE 0 END), 0) AS periodApproved,
         COALESCE(SUM(CASE WHEN account_status = 'rejected' THEN 1 ELSE 0 END), 0) AS periodRejected
       FROM merchants
       WHERE 1=1 ${merchantDateFilter}
@@ -111,10 +111,17 @@ export const adminRepository = {
   async getApplicationStatusDistribution() {
     const [rows] = await db.execute(`
       SELECT
-        account_status,
+        CASE 
+          WHEN account_status = 'active' THEN 'approved'
+          ELSE account_status 
+        END AS account_status,
         COUNT(*) AS count
       FROM merchants
-      GROUP BY account_status
+      GROUP BY 
+        CASE 
+          WHEN account_status = 'active' THEN 'approved'
+          ELSE account_status 
+        END
     `);
 
     const ALL_STATUSES = [
@@ -125,7 +132,6 @@ export const adminRepository = {
       "approved",
       "rejected",
       "suspended",
-      "active",
     ];
 
     const countMap = {};

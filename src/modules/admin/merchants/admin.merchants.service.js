@@ -255,21 +255,45 @@ export const adminMerchantsService = {
           };
 
           for (const item of requiredItems) {
-            const fieldKey = itemKeyMap[item] || item.toLowerCase().replace(/\s+/g, "_");
-            // Mark existing open issue for this field or insert new
-            await conn.execute(
-              `INSERT INTO kyc_field_issues 
-               (merchant_id, kyc_id, institution_id, field_key, issue_type, issue_reason, reviewer_id, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, 'incorrect_value', ?, ?, 'open', NOW(), NOW())`,
-              [
-                merchantId,
-                kycId,
-                instId,
-                fieldKey,
-                comment || reason || `Correction requested: ${item}`,
-                adminUser?.id || null,
-              ]
+            let fieldKey = "";
+            let itemComment = "";
+            if (typeof item === "object" && item !== null) {
+              fieldKey = item.fieldKey || item.field_key || item.key || "";
+              itemComment = item.comment || item.reason || item.issueReason || "";
+            } else if (typeof item === "string") {
+              fieldKey = itemKeyMap[item] || item.toLowerCase().replace(/\s+/g, "_");
+              itemComment = comment || reason || `Correction requested: ${item}`;
+            }
+
+            if (!fieldKey) continue;
+            const finalReason = itemComment || comment || reason || `Correction requested for ${fieldKey}`;
+
+            // Check if there is an existing open issue for this field
+            const [existing] = await conn.execute(
+              `SELECT id FROM kyc_field_issues WHERE merchant_id = ? AND field_key = ? AND status = 'open' LIMIT 1`,
+              [merchantId, fieldKey]
             );
+
+            if (existing.length > 0) {
+              await conn.execute(
+                `UPDATE kyc_field_issues SET issue_reason = ?, issue_type = 'incorrect_value', updated_at = NOW() WHERE id = ?`,
+                [finalReason, existing[0].id]
+              );
+            } else {
+              await conn.execute(
+                `INSERT INTO kyc_field_issues 
+                 (merchant_id, kyc_id, institution_id, field_key, issue_type, issue_reason, reviewer_id, status, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, 'incorrect_value', ?, ?, 'open', NOW(), NOW())`,
+                [
+                  merchantId,
+                  kycId,
+                  instId,
+                  fieldKey,
+                  finalReason,
+                  adminUser?.id || null,
+                ]
+              );
+            }
           }
         }
       } else if (action === "suspend") {
@@ -332,13 +356,24 @@ export const adminMerchantsService = {
       });
 
       // Insert Persistent Notification for Merchant & Platform
+      const notifLink = (action === "request_information" || action === "request_info")
+        ? "/merchant/onboarding/kyc"
+        : "/merchant/dashboard";
+
+      let notifMessage = comment || `Your merchant onboarding application status has been updated to ${newAccountStatus}.`;
+      if ((action === "request_information" || action === "request_info") && Array.isArray(requiredItems) && requiredItems.length > 0) {
+        const itemNames = requiredItems.map(it => (typeof it === "object" ? (it.fieldLabel || it.fieldKey) : it)).join(", ");
+        notifMessage = comment ? `${comment} (Required updates: ${itemNames})` : `Please update the following required information: ${itemNames}`;
+      }
+
       await conn.execute(
         `INSERT INTO notifications (recipient_type, recipient_id, title, message, type, link, is_read, created_at)
-         VALUES ('merchant', ?, ?, ?, 'merchant_update', '/merchant/dashboard', 0, NOW())`,
+         VALUES ('merchant', ?, ?, ?, 'merchant_update', ?, 0, NOW())`,
         [
           merchant.user_id,
           `Application Update: ${newAccountStatus.toUpperCase()}`,
-          comment || `Your merchant onboarding application status has been updated to ${newAccountStatus}.`,
+          notifMessage,
+          notifLink,
         ]
       );
 
@@ -689,10 +724,21 @@ export const adminMerchantsService = {
       // 11. Delete onboarding history
       await conn.execute("DELETE FROM merchant_onboarding_history WHERE merchant_id = ?", [merchantId]);
 
-      // 12. Delete notifications
+      // 12. Delete notifications (including by recipient_id, link, merchant_code, and company_name)
       await conn.execute(
-        "DELETE FROM notifications WHERE recipient_id = ? OR link LIKE ?",
-        [userId, `%/merchants/${merchantId}%`]
+        `DELETE FROM notifications 
+         WHERE recipient_id = ? 
+            OR link LIKE ? 
+            OR link LIKE ?
+            OR message LIKE ? 
+            OR title LIKE ?`,
+        [
+          userId,
+          `%/merchants/${merchantId}%`,
+          `%merchantId=${merchantId}%`,
+          `%${merchant.merchant_code}%`,
+          `%${merchant.merchant_code}%`,
+        ]
       );
 
       // 13. Delete merchant record
@@ -923,6 +969,74 @@ export const adminMerchantsService = {
     const filename = `BanglaQR_All_Merchants_${dateStr}.xlsx`;
     const buffer = await generateAllMerchantsExcel(merchants);
     return { buffer, filename };
+  },
+
+  async resolveKycIssue({ merchantId, issueId, note = "Approved by compliance", adminUser }) {
+    const [[issue]] = await db.query(
+      "SELECT * FROM kyc_field_issues WHERE id = ? AND merchant_id = ?",
+      [issueId, merchantId]
+    );
+    if (!issue) {
+      const err = new Error("KYC issue not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    await db.query(
+      `UPDATE kyc_field_issues
+       SET status = 'resolved',
+           resolution_note = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [note, issueId]
+    );
+
+    if (adminUser?.id) {
+      await logAdminAudit({
+        adminUserId: adminUser.id,
+        action: "merchant.kyc_issue.resolved",
+        targetType: "merchant",
+        targetId: merchantId,
+        details: { issueId, fieldKey: issue.field_key, note },
+      });
+    }
+
+    return {
+      success: true,
+      message: `Issue for ${issue.field_key} marked as resolved/approved.`,
+      issueId,
+      status: "resolved",
+    };
+  },
+
+  async deleteKycIssue({ merchantId, issueId, adminUser }) {
+    const [[issue]] = await db.query(
+      "SELECT * FROM kyc_field_issues WHERE id = ? AND merchant_id = ?",
+      [issueId, merchantId]
+    );
+    if (!issue) {
+      const err = new Error("KYC issue not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    await db.query("DELETE FROM kyc_field_issues WHERE id = ? AND merchant_id = ?", [issueId, merchantId]);
+
+    if (adminUser?.id) {
+      await logAdminAudit({
+        adminUserId: adminUser.id,
+        action: "merchant.kyc_issue.deleted",
+        targetType: "merchant",
+        targetId: merchantId,
+        details: { issueId, fieldKey: issue.field_key },
+      });
+    }
+
+    return {
+      success: true,
+      message: `Resubmit issue record for ${issue.field_key} deleted successfully.`,
+      issueId,
+    };
   },
 };
 

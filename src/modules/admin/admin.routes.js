@@ -24,6 +24,7 @@ import { faqController } from "./cms/faq.controller.js";
 import formBuilderRoutes from "./formBuilder/formBuilder.routes.js";
 import { adminUsersController } from "./users/admin.users.controller.js";
 import { merchantUsersController } from "./merchants/merchantUsers.module.js";
+import { adminMerchantQrController } from "./merchants/admin.merchantQr.controller.js";
 import { trashController } from "./trash/trash.module.js";
 
 const router = express.Router();
@@ -46,6 +47,15 @@ router.post("/merchant-users/batch-delete", requirePermission("merchant.approve"
 router.put("/merchant-users/:userId", requirePermission("merchant.approve"), merchantUsersController.update);
 router.post("/merchant-users/:userId/change-password", requirePermission("merchant.approve"), merchantUsersController.changePassword);
 
+// Merchant QR Routes (Admin upload & view)
+router.get("/merchant-qr", requirePermission("merchant.view"), adminMerchantQrController.listApprovedMerchantsForQr);
+router.post(
+  "/merchant-qr/:merchantId/upload",
+  requirePermission("merchant.approve"),
+  uploadDocument.single("file"),
+  adminMerchantQrController.uploadMerchantQrCode
+);
+
 router.get("/merchants", requirePermission("merchant.view"), adminMerchantsController.list);
 router.get("/merchants/export-excel", requirePermission("merchant.view"), adminMerchantsController.exportAllExcel);
 router.post(
@@ -59,6 +69,8 @@ router.get("/merchants/:merchantId/export-pdf", requirePermission("merchant.view
 router.get("/merchants/:merchantId/export-excel", requirePermission("merchant.view"), adminMerchantsController.exportExcel);
 router.get("/merchants/:merchantId/history", requirePermission("merchant.view"), adminMerchantsController.getHistory);
 router.post("/merchants/:merchantId/review", requirePermission("merchant.approve"), adminMerchantsController.review);
+router.post("/merchants/:merchantId/issues/:issueId/resolve", requirePermission("merchant.approve"), adminMerchantsController.resolveIssue);
+router.delete("/merchants/:merchantId/issues/:issueId", requirePermission("merchant.approve"), adminMerchantsController.deleteIssue);
 router.post("/merchants/:merchantId/reset-password", requirePermission("merchant.approve"), adminMerchantsController.resetPassword);
 router.delete("/merchants/:merchantId", requirePermission("merchant.approve"), adminMerchantsController.delete);
 router.post("/merchants/batch-delete", requirePermission("merchant.approve"), adminMerchantsController.batchDelete);
