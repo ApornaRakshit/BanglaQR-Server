@@ -26,12 +26,13 @@ app.set("trust proxy", env.nodeEnv === "production" ? 1 : false);
 app.disable("x-powered-by");
 
 
-const allowedFrontendOrigins = new Set(env.frontendUrls);
+const allowedFrontendOrigins = new Set(
+  env.frontendUrls.map((url) => url.trim().replace(/\/+$/, ""))
+);
 
 app.use(
   cors({
     origin(origin, callback) {
-      // Allow requests without a browser Origin header.
       if (!origin) {
         return callback(null, true);
       }
@@ -40,16 +41,19 @@ app.use(
         return callback(null, true);
       }
 
-      // Allow any localhost / 127.0.0.1 port in development (e.g. 5173, 5174, 5175)
       if (
-        env.nodeEnv !== 'production' &&
+        env.nodeEnv !== "production" &&
         /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
       ) {
         return callback(null, true);
       }
 
-      console.warn(`[CORS] Blocked origin: ${origin}`);
-      return callback(null, false);
+      console.error("[CORS BLOCKED]", {
+        origin,
+        allowed: [...allowedFrontendOrigins],
+      });
+
+      return callback(new Error(`CORS blocked: ${origin}`));
     },
 
     credentials: true,
@@ -64,8 +68,13 @@ app.use(
       "OPTIONS",
     ],
 
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+    ],
+
     maxAge: 86400,
-    optionsSuccessStatus: 204,
   })
 );
 

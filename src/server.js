@@ -20,9 +20,9 @@ async function startServer() {
       console.log("=================================");
       console.log(`Environment: ${env.nodeEnv}`);
       console.log(`Port: ${env.port}`);
-      console.log(`API Base: ${env.nodeEnv === "production" ? "https://api.banglaqr.com.bd" : `http://localhost:${env.port}`}`);
+      console.log(`API Base: ${env.nodeEnv === "production" ? "https://api.banglaqr.online" : `http://localhost:${env.port}`}`);
       console.log(
-        `Health: ${env.nodeEnv === "production" ? "https://api.banglaqr.com.bd/api/health" : `http://localhost:${env.port}/api/health`}`
+        `Health: ${env.nodeEnv === "production" ? "https://api.banglaqr.online/api/health" : `http://localhost:${env.port}/api/health`}`
       );
       console.log("=================================");
     });

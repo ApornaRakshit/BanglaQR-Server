@@ -596,9 +596,10 @@ export async function generateAllMerchantsExcel(merchants = []) {
     { header: "Account Status", key: "account_status", width: 16 },
     { header: "KYC Status", key: "kyc_status", width: 16 },
     { header: "Bank / MFS Channel", key: "bank_name", width: 24 },
-    { header: "Account Name", key: "bank_account_name", width: 24 },
-    { header: "Account Number", key: "bank_account_number", width: 22 },
-    { header: "Branch Name", key: "branch_name", width: 20 },
+    { header: "All Applied Institutions", key: "all_institutions", width: 38 },
+    { header: "Account Name", key: "bank_account_name", width: 34 },
+    { header: "Account Number", key: "bank_account_number", width: 30 },
+    { header: "Branch Name", key: "branch_name", width: 28 },
     { header: "Trade License No", key: "trade_license_number", width: 24 },
     { header: "e-TIN No", key: "tin", width: 20 },
     { header: "BIN / VAT", key: "bin", width: 18 },
@@ -611,7 +612,7 @@ export async function generateAllMerchantsExcel(merchants = []) {
   ws.spliceRows(1, 0, []);
   ws.spliceRows(1, 0, []);
 
-  ws.mergeCells("A1:U1");
+  ws.mergeCells("A1:V1");
   const titleCell = ws.getCell("A1");
   titleCell.value = "BANGLAQR DIGITAL PAYMENT SERVICES — ALL MERCHANTS DIRECTORY";
   titleCell.font = { name: "Arial", size: 13, bold: true, color: { argb: "FFFFFFFF" } };
@@ -619,7 +620,7 @@ export async function generateAllMerchantsExcel(merchants = []) {
   titleCell.alignment = { horizontal: "center", vertical: "middle" };
   ws.getRow(1).height = 28;
 
-  ws.mergeCells("A2:U2");
+  ws.mergeCells("A2:V2");
   const metaCell = ws.getCell("A2");
   metaCell.value = `Exported Records: ${merchants.length} | Export Date: ${new Date().toLocaleString()} | Official Admin Management Report`;
   metaCell.font = { name: "Arial", size: 9, italic: true, color: { argb: "FF334155" } };
@@ -649,6 +650,7 @@ export async function generateAllMerchantsExcel(merchants = []) {
       account_status: String(m.account_status || "").toUpperCase(),
       kyc_status: String(m.kyc_status || "").toUpperCase(),
       bank_name: m.bank_name || "—",
+      all_institutions: m.all_institutions_summary || m.bank_name || "—",
       bank_account_name: m.bank_account_name || "—",
       bank_account_number: m.bank_account_number || "—",
       branch_name: m.branch_name || "—",

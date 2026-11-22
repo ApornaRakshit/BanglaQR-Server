@@ -244,10 +244,25 @@ export const adminMerchantsRepository = {
           k.bank_account_number,
           k.branch_name,
           k.routing_number,
+          k.institution_id AS primary_institution_id,
           k.trade_license_number,
           k.tin,
           k.bin,
-          (SELECT COUNT(*) FROM merchant_documents md WHERE md.merchant_id = m.id) AS document_count
+          (SELECT COUNT(*) FROM merchant_documents md WHERE md.merchant_id = m.id) AS document_count,
+          (
+            SELECT GROUP_CONCAT(
+              DISTINCT CONCAT(
+                COALESCE(inst.name, mga_sub.gateway_name, 'Institution'),
+                ' (',
+                UPPER(COALESCE(mga_sub.status, 'SUBMITTED')),
+                ')'
+              )
+              SEPARATOR ' | '
+            )
+            FROM merchant_gateway_applications mga_sub
+            LEFT JOIN institutions inst ON inst.id = mga_sub.institution_id
+            WHERE mga_sub.merchant_id = m.id
+          ) AS all_institutions_summary
         FROM merchants m
         JOIN users u ON m.user_id = u.id
         LEFT JOIN merchant_profiles p ON p.merchant_id = m.id
@@ -258,6 +273,100 @@ export const adminMerchantsRepository = {
       `,
       params
     );
+
+    if (rows.length === 0) {
+      return [];
+    }
+
+    // Fetch all gateway applications for these merchants to get institution-wise bank account details
+    const merchantIds = rows.map((r) => r.id);
+    const placeholders = merchantIds.map(() => "?").join(", ");
+    const [allApps] = await db.query(
+      `
+        SELECT
+          mga.merchant_id,
+          mga.institution_id,
+          mga.status,
+          mga.submitted_data_snapshot,
+          COALESCE(inst.name, mga.gateway_name, 'Institution') AS inst_name,
+          ib.branch_name AS ib_branch_name
+        FROM merchant_gateway_applications mga
+        LEFT JOIN institutions inst ON inst.id = mga.institution_id
+        LEFT JOIN institution_branches ib ON ib.id = mga.branch_id
+        WHERE mga.merchant_id IN (${placeholders})
+        ORDER BY mga.id ASC
+      `,
+      merchantIds
+    );
+
+    const appsByMerchantId = new Map();
+    for (const app of allApps) {
+      if (!appsByMerchantId.has(app.merchant_id)) {
+        appsByMerchantId.set(app.merchant_id, []);
+      }
+      appsByMerchantId.get(app.merchant_id).push(app);
+    }
+
+    // Enrich rows with institution-wise account name, account number, branch name
+    for (const r of rows) {
+      const apps = appsByMerchantId.get(r.id) || [];
+      if (apps.length > 0) {
+        const instList = apps.map((app) => {
+          let snap = {};
+          try {
+            snap =
+              typeof app.submitted_data_snapshot === "string"
+                ? JSON.parse(app.submitted_data_snapshot)
+                : app.submitted_data_snapshot || {};
+          } catch (e) {}
+
+          const instName = app.inst_name;
+          const isPrimary =
+            (r.primary_institution_id && Number(r.primary_institution_id) === Number(app.institution_id)) ||
+            (r.bank_name && r.bank_name.trim().toLowerCase() === instName.trim().toLowerCase());
+
+          const accountName =
+            snap.accountName ||
+            snap.accountTitle ||
+            (isPrimary ? r.bank_account_name : null) ||
+            r.bank_account_name ||
+            "—";
+
+          const accountNumber =
+            snap.accountNumber ||
+            snap.accountNumberDigits ||
+            (isPrimary ? r.bank_account_number : null) ||
+            r.bank_account_number ||
+            "—";
+
+          const branchName =
+            snap.branchName ||
+            app.ib_branch_name ||
+            (isPrimary ? r.branch_name : null) ||
+            r.branch_name ||
+            "—";
+
+          return {
+            institution: instName,
+            status: String(app.status || "SUBMITTED").toUpperCase(),
+            accountName,
+            accountNumber,
+            branchName,
+          };
+        });
+
+        // If merchant has multiple institution applications, format institution-wise with prefix
+        if (instList.length > 1) {
+          r.bank_account_name = instList.map((d) => `${d.institution}: ${d.accountName}`).join(" | ");
+          r.bank_account_number = instList.map((d) => `${d.institution}: ${d.accountNumber}`).join(" | ");
+          r.branch_name = instList.map((d) => `${d.institution}: ${d.branchName}`).join(" | ");
+        } else if (instList.length === 1) {
+          r.bank_account_name = instList[0].accountName || r.bank_account_name;
+          r.bank_account_number = instList[0].accountNumber || r.bank_account_number;
+          r.branch_name = instList[0].branchName || r.branch_name;
+        }
+      }
+    }
 
     return rows;
   },

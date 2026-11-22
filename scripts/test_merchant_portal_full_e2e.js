@@ -1,5 +1,5 @@
 // const BASE_URL = process.env.API_BASE_URL || "http://localhost:5000/api/v1";
-const BASE_URL = process.env.API_BASE_URL || "https://api.banglaqr.com.bd/api/v1";
+const BASE_URL = process.env.API_BASE_URL || "https://api.banglaqr.online/api/v1";
 
 async function request(url, options = {}) {
   const res = await fetch(url, options);

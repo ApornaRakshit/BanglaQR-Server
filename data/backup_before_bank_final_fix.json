@@ -727,9 +727,13 @@
           "http://localhost:5173",
           "https://banglaqr.com.bd",
           "https://www.banglaqr.com.bd",
-          "https://api.banglaqr.com.bd",
+          "https://api.banglaqr.online",
           "https://www.api.banglaqr.online",
-          "http://localhost:3000"
+          "http://localhost:3000",
+          "https://banglaqr.online",
+          "https://www.banglaqr.online",
+          "https://api.banglaqr.online",
+          "https://www.api.banglaqr.online"
         ],
         "maintenanceMode": false
       },

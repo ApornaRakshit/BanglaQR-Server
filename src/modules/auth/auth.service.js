@@ -374,6 +374,19 @@ export async function registerUser({
 
     await connection.commit();
 
+    // Create Admin Notification for newly registered merchant
+    try {
+      const merchantDisplayName = contactName || normalizedEmail || normalizedPhone;
+      await merchantRepository.createAdminNotification(
+        "নতুন মার্চেন্ট রেজিস্ট্রেশন",
+        `নতুন মার্চেন্ট ${merchantDisplayName} (${merchant.merchant_code}) সফলভাবে প্ল্যাটফর্মে রেজিস্ট্রেশন সম্পন্ন করেছেন।`,
+        "merchant",
+        "/admin/merchants"
+      );
+    } catch (adminNotifErr) {
+      console.warn("[RegisterUser] Failed to create admin notification:", adminNotifErr.message);
+    }
+
     return {
       userId,
       merchantId: merchant.id,
@@ -520,6 +533,19 @@ export async function verifyOtp({
         [otp.id]
       );
       await connection.commit();
+
+    // Create Admin Notification for newly registered merchant
+    try {
+      const merchantDisplayName = contactName || normalizedEmail || normalizedPhone;
+      await merchantRepository.createAdminNotification(
+        "নতুন মার্চেন্ট রেজিস্ট্রেশন",
+        `নতুন মার্চেন্ট ${merchantDisplayName} (${merchant.merchant_code}) সফলভাবে প্ল্যাটফর্মে রেজিস্ট্রেশন সম্পন্ন করেছেন।`,
+        "merchant",
+        "/admin/merchants"
+      );
+    } catch (adminNotifErr) {
+      console.warn("[RegisterUser] Failed to create admin notification:", adminNotifErr.message);
+    }
 
       const remainingAttempts = MAX_OTP_ATTEMPTS - (otp.attempts + 1);
       const error = new Error(
@@ -680,6 +706,19 @@ export async function verifyOtp({
       );
       const resetChallengeToken = createPasswordResetChallengeToken(user, challengeJti);
       await connection.commit();
+
+    // Create Admin Notification for newly registered merchant
+    try {
+      const merchantDisplayName = contactName || normalizedEmail || normalizedPhone;
+      await merchantRepository.createAdminNotification(
+        "নতুন মার্চেন্ট রেজিস্ট্রেশন",
+        `নতুন মার্চেন্ট ${merchantDisplayName} (${merchant.merchant_code}) সফলভাবে প্ল্যাটফর্মে রেজিস্ট্রেশন সম্পন্ন করেছেন।`,
+        "merchant",
+        "/admin/merchants"
+      );
+    } catch (adminNotifErr) {
+      console.warn("[RegisterUser] Failed to create admin notification:", adminNotifErr.message);
+    }
       return {
         verified: true,
         userId: user.id,
@@ -691,6 +730,19 @@ export async function verifyOtp({
     const accessToken = createAccessToken(user);
 
     await connection.commit();
+
+    // Create Admin Notification for newly registered merchant
+    try {
+      const merchantDisplayName = contactName || normalizedEmail || normalizedPhone;
+      await merchantRepository.createAdminNotification(
+        "নতুন মার্চেন্ট রেজিস্ট্রেশন",
+        `নতুন মার্চেন্ট ${merchantDisplayName} (${merchant.merchant_code}) সফলভাবে প্ল্যাটফর্মে রেজিস্ট্রেশন সম্পন্ন করেছেন।`,
+        "merchant",
+        "/admin/merchants"
+      );
+    } catch (adminNotifErr) {
+      console.warn("[RegisterUser] Failed to create admin notification:", adminNotifErr.message);
+    }
 
     return {
       verified: true,
@@ -1692,6 +1744,19 @@ export async function resetPassword({ token, newPassword }) {
 
       await connection.commit();
 
+    // Create Admin Notification for newly registered merchant
+    try {
+      const merchantDisplayName = contactName || normalizedEmail || normalizedPhone;
+      await merchantRepository.createAdminNotification(
+        "নতুন মার্চেন্ট রেজিস্ট্রেশন",
+        `নতুন মার্চেন্ট ${merchantDisplayName} (${merchant.merchant_code}) সফলভাবে প্ল্যাটফর্মে রেজিস্ট্রেশন সম্পন্ন করেছেন।`,
+        "merchant",
+        "/admin/merchants"
+      );
+    } catch (adminNotifErr) {
+      console.warn("[RegisterUser] Failed to create admin notification:", adminNotifErr.message);
+    }
+
       return {
         success: true,
         message: "আপনার পাসওয়ার্ড সফলভাবে পরিবর্তন করা হয়েছে! নতুন পাসওয়ার্ড দিয়ে লগইন করুন।",
@@ -1780,6 +1845,19 @@ export async function resetPassword({ token, newPassword }) {
     } catch {}
 
     await connection.commit();
+
+    // Create Admin Notification for newly registered merchant
+    try {
+      const merchantDisplayName = contactName || normalizedEmail || normalizedPhone;
+      await merchantRepository.createAdminNotification(
+        "নতুন মার্চেন্ট রেজিস্ট্রেশন",
+        `নতুন মার্চেন্ট ${merchantDisplayName} (${merchant.merchant_code}) সফলভাবে প্ল্যাটফর্মে রেজিস্ট্রেশন সম্পন্ন করেছেন।`,
+        "merchant",
+        "/admin/merchants"
+      );
+    } catch (adminNotifErr) {
+      console.warn("[RegisterUser] Failed to create admin notification:", adminNotifErr.message);
+    }
 
     return {
       success: true,
@@ -1993,6 +2071,19 @@ export async function acceptInstitutionInvitation({ token: rawToken, password, n
     );
 
     await connection.commit();
+
+    // Create Admin Notification for newly registered merchant
+    try {
+      const merchantDisplayName = contactName || normalizedEmail || normalizedPhone;
+      await merchantRepository.createAdminNotification(
+        "নতুন মার্চেন্ট রেজিস্ট্রেশন",
+        `নতুন মার্চেন্ট ${merchantDisplayName} (${merchant.merchant_code}) সফলভাবে প্ল্যাটফর্মে রেজিস্ট্রেশন সম্পন্ন করেছেন।`,
+        "merchant",
+        "/admin/merchants"
+      );
+    } catch (adminNotifErr) {
+      console.warn("[RegisterUser] Failed to create admin notification:", adminNotifErr.message);
+    }
 
     return {
       success: true,

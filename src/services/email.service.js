@@ -574,7 +574,8 @@ This link is valid for ${expiresDays} days and can only be used once.
       ? `"${config.senderName || 'BanglaQR Security'}" <${config.senderEmail}>`
       : (process.env.SMTP_FROM || `"BanglaQR Security" <noreply@banglaqr.com>`);
     const subject = "Your BanglaQR Merchant Portal Login Credentials";
-    const siteUrl = loginUrl || "https://banglaqr.com.bd/login";
+    // const siteUrl = loginUrl || "https://banglaqr.com.bd/login";
+    const siteUrl = loginUrl || "https://banglaqr.online/login";
 
     const htmlContent = `
 <!DOCTYPE html>

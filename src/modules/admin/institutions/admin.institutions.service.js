@@ -1174,6 +1174,16 @@ export const adminInstitutionsService = {
     return { success: true, message: "Staff membership updated successfully" };
   },
 
+  async getStaffMembership(membershipId) {
+    const validMembershipId = Number(membershipId);
+    if (!Number.isSafeInteger(validMembershipId) || validMembershipId <= 0) {
+      const err = new Error("Invalid staff membership ID");
+      err.statusCode = 400;
+      throw err;
+    }
+    return adminInstitutionsRepository.getStaffMembership(validMembershipId);
+  },
+
   async deleteStaffMembership(membershipId, adminUser, reqMeta = {}) {
     const validMembershipId = Number(membershipId);
     if (!Number.isSafeInteger(validMembershipId) || validMembershipId <= 0) {
@@ -1911,7 +1921,8 @@ export const adminInstitutionsService = {
     });
 
     // Use configured trusted frontend URL; never trust arbitrary untrusted Origin headers
-    let frontendBase = env?.frontendUrl || (env?.nodeEnv === "production" ? "https://banglaqr.com.bd" : "http://localhost:5173");
+    // let frontendBase = env?.frontendUrl || (env?.nodeEnv === "production" ? "https://banglaqr.com.bd" : "http://localhost:5173");
+    let frontendBase = env?.frontendUrl || (env?.nodeEnv === "production" ? "https://banglaqr.online" : "http://localhost:5173");
     if (reqMeta?.origin) {
       try {
         const candidate = new URL(reqMeta.origin).origin;

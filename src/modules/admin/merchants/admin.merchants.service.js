@@ -912,7 +912,8 @@ export const adminMerchantsService = {
       merchantName,
       email: userEmail,
       password: generatedPassword,
-      loginUrl: process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/login` : "https://banglaqr.com.bd/login",
+      // loginUrl: process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/login` : "https://banglaqr.com.bd/login",
+      loginUrl: process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/login` : "https://banglaqr.online/login",
     });
 
     // 7. Audit log for administrator action

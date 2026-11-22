@@ -57,7 +57,7 @@ function normalizeOrigin(value) {
 // Default frontend URL for existing code that expects one URL.
 const defaultFrontendUrl =
   nodeEnv === "production"
-    ? "https://banglaqr.com.bd"
+    ? "https://banglaqr.online"
     : "http://localhost:5173";
 
 const rawFrontendUrl = process.env.FRONTEND_URL?.trim();
@@ -91,13 +91,19 @@ const configuredFrontendOrigins = (
     return origin;
   });
 
+// Production default origins that should always be allowed
+const productionDefaultOrigins = [
+  "https://banglaqr.online",
+  "https://www.banglaqr.online",
+];
+
 // Local development origins are enabled only outside production.
 const developmentOrigins =
   nodeEnv === "production"
     ? []
     : [
-      "https://banglaqr.com.bd",
-      "https://www.banglaqr.com.bd",
+        "https://banglaqr.online",
+        "https://www.banglaqr.online",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
@@ -107,6 +113,7 @@ const developmentOrigins =
 const frontendUrls = [
   ...new Set([
     frontendUrl,
+    ...productionDefaultOrigins,
     ...configuredFrontendOrigins,
     ...developmentOrigins,
   ]),
@@ -179,9 +186,14 @@ export const env = {
     // callbackUrl: process.env.DGEPAY_CALLBACK_URL || "http://localhost:5000/api/v1/payments/dgepay/callback",
     // frontendResultUrl: process.env.DGEPAY_FRONTEND_RESULT_URL || "http://localhost:5173/merchant/addons?payment=result",
     
-    redirectUrl: process.env.DGEPAY_REDIRECT_URL || "https://api.banglaqr.com.bd/api/v1/payments/dgepay/callback",
-    callbackUrl: process.env.DGEPAY_CALLBACK_URL || "https://api.banglaqr.com.bd/api/v1/payments/dgepay/callback",
-    frontendResultUrl: process.env.DGEPAY_FRONTEND_RESULT_URL || "https://banglaqr.com.bd/merchant/addons?payment=result",
+    // redirectUrl: process.env.DGEPAY_REDIRECT_URL || "https://api.banglaqr.online/api/v1/payments/dgepay/callback",
+    // callbackUrl: process.env.DGEPAY_CALLBACK_URL || "https://api.banglaqr.online/api/v1/payments/dgepay/callback",
+    // frontendResultUrl: process.env.DGEPAY_FRONTEND_RESULT_URL || "https://banglaqr.com.bd/merchant/addons?payment=result",
+
+
+    redirectUrl: process.env.DGEPAY_REDIRECT_URL || "https://api.banglaqr.online/api/v1/payments/dgepay/callback",
+    callbackUrl: process.env.DGEPAY_CALLBACK_URL || "https://api.banglaqr.online/api/v1/payments/dgepay/callback",
+    frontendResultUrl: process.env.DGEPAY_FRONTEND_RESULT_URL || "https://banglaqr.online/merchant/addons?payment=result",
     
     debug: process.env.DGEPAY_DEBUG === "true",
   },
