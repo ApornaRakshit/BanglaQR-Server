@@ -1439,7 +1439,7 @@ export const institutionService = {
         await conn.execute(
           `INSERT INTO notifications (
             recipient_id, institution_id, recipient_type, title, message, type, link, is_read, created_at
-          ) VALUES (?, NULL, 'merchant', ?, ?, 'merchant_update', '/merchant/services/amar-bangla-qr', 0, NOW())`,
+          ) VALUES (?, NULL, 'merchant', ?, ?, 'merchant_update', '/merchant/services', 0, NOW())`,
           [
             userRows[0].user_id,
             "বাংলা কিউআর (Bangla QR) প্রদান করা হয়েছে",

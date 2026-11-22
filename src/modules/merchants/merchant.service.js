@@ -1462,20 +1462,28 @@ function toSnakeCaseKey(str) {
 
     // Auto-resolve open KYC issue matching this document type and notify Admin & Institution
     const docKey = String(normalizedType || "").toLowerCase();
+    const docKeyUnderscore = docKey.replace(/-/g, "_");
     const [matchingIssues] = await db.query(
       `SELECT id, institution_id, field_key, issue_reason FROM kyc_field_issues
        WHERE merchant_id = ? AND status = 'open'
-       AND (field_key = ? OR field_key = ? OR LOWER(field_key) LIKE ?)`,
-      [merchant.id, docKey, normalizedType, `%${docKey}%`]
+       AND (
+         field_key = ? OR field_key = ?
+         OR LOWER(field_key) LIKE ?
+         OR ? LIKE CONCAT('%', LOWER(field_key), '%')
+         OR LOWER(field_key) LIKE ?
+         OR (LOWER(field_key) LIKE '%outlet%' AND ? LIKE '%outlet%')
+         OR (LOWER(field_key) LIKE '%store%' AND ? LIKE '%outlet%')
+       )`,
+      [merchant.id, docKey, normalizedType, `%${docKey}%`, docKey, `%${docKeyUnderscore}%`, docKey, docKey]
     );
 
     if (matchingIssues.length > 0) {
+      const issueIds = matchingIssues.map(i => i.id);
       await db.query(
         `UPDATE kyc_field_issues
          SET status = 'resolved', resolution_note = 'Document uploaded by merchant', updated_at = NOW()
-         WHERE merchant_id = ? AND status = 'open'
-         AND (field_key = ? OR field_key = ? OR LOWER(field_key) LIKE ?)`,
-        [merchant.id, docKey, normalizedType, `%${docKey}%`]
+         WHERE id IN (${issueIds.map(() => '?').join(',')})`,
+        issueIds
       );
     }
 
@@ -2338,9 +2346,17 @@ function toSnakeCaseKey(str) {
       );
       targetIssues = rows;
     } else if (fieldKey) {
+      const fKeyClean = String(fieldKey).trim().toLowerCase();
       const [rows] = await db.query(
-        `SELECT * FROM kyc_field_issues WHERE merchant_id = ? AND field_key = ? AND status = 'open'`,
-        [merchant.id, fieldKey]
+        `SELECT * FROM kyc_field_issues
+         WHERE merchant_id = ? AND status = 'open'
+         AND (
+           field_key = ? OR field_key = ?
+           OR LOWER(field_key) = ?
+           OR LOWER(field_key) LIKE ?
+           OR ? LIKE CONCAT('%', LOWER(field_key), '%')
+         )`,
+        [merchant.id, fieldKey, fKeyClean, fKeyClean, `%${fKeyClean}%`, fKeyClean]
       );
       targetIssues = rows;
     } else {
@@ -2496,6 +2512,16 @@ function toSnakeCaseKey(str) {
           targetDocType = "TRADE_LICENSE";
         } else if (fieldKeyLower.includes("bin") || reasonLower.includes("bin")) {
           targetDocType = "BIN_CERTIFICATE";
+        } else if (
+          fieldKeyLower.includes("outlet") ||
+          fieldKeyLower.includes("store") ||
+          fieldKeyLower.includes("shop") ||
+          reasonLower.includes("outlet") ||
+          reasonLower.includes("store") ||
+          reasonLower.includes("দোকান") ||
+          reasonLower.includes("আউটলেট")
+        ) {
+          targetDocType = "BUSINESS_OUTLET_PHOTO";
         }
 
         if (targetDocType) {
