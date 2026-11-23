@@ -4342,6 +4342,235 @@ function toSnakeCaseKey(str) {
   },
 
   /**
+   * Cancel an application (either in merchant_gateway_applications or primary onboarding)
+   */
+  async cancelPaymentMethodApplication(userId, institutionId) {
+    const instId = Number(institutionId);
+    if (!instId || isNaN(instId) || instId <= 0) {
+      const err = new Error("Invalid institution ID.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    if (!merchant) {
+      const err = new Error("Merchant account not found.");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    // 1. Fetch institution details
+    const [instRows] = await db.query(
+      "SELECT id, name, name_bn FROM institutions WHERE id = ? LIMIT 1",
+      [instId]
+    );
+    const instName = instRows[0]?.name || "সংশ্লিষ্ট ব্যাংক বা MFS";
+
+    // 2. Fetch merchant company info
+    const [profRows] = await db.query(
+      "SELECT company_name, institution_id FROM merchant_profiles WHERE merchant_id = ? LIMIT 1",
+      [merchant.id]
+    );
+    const company = profRows[0]?.company_name || merchant.merchant_code || `Merchant #${merchant.id}`;
+    const primaryInstId = profRows[0]?.institution_id ? Number(profRows[0].institution_id) : null;
+
+    // Check if this was cancelled previously and is now being cancelled again or if active
+    // Check in merchant_gateway_applications
+    const [appRows] = await db.query(
+      "SELECT id, status FROM merchant_gateway_applications WHERE merchant_id = ? AND institution_id = ? LIMIT 1",
+      [merchant.id, instId]
+    );
+
+    let cancelledSomething = false;
+    if (appRows.length > 0) {
+      await db.query(
+        "UPDATE merchant_gateway_applications SET status = 'cancelled', updated_at = NOW() WHERE id = ?",
+        [appRows[0].id]
+      );
+      cancelledSomething = true;
+    }
+
+    // If it's also primary onboarding institution
+    if (primaryInstId === instId) {
+      await db.query(
+        "UPDATE merchants SET account_status = 'draft', kyc_status = 'pending', updated_at = NOW() WHERE id = ?",
+        [merchant.id]
+      );
+      cancelledSomething = true;
+    }
+
+    // Also cancel any availability request for this institution
+    await db.query(
+      "UPDATE institution_availability_requests SET request_status = 'cancelled', active_pending_key = NULL, updated_at = NOW() WHERE merchant_id = ? AND institution_id = ?",
+      [merchant.id, instId]
+    );
+
+    // Save cancel record into history
+    try {
+      await merchantRepository.createHistory(
+        merchant.id,
+        "onboarding_application",
+        "cancel_application",
+        "submitted",
+        "cancelled",
+        { institutionId: instId, institutionName: instName }
+      );
+    } catch (_) {}
+
+    // Send notifications to Admin and Institution
+    try {
+      await merchantRepository.createAdminNotification(
+        `মার্চেন্ট আবেদন বাতিল: ${instName}`,
+        `মার্চেন্ট ${company} (${merchant.merchant_code}) ${instName}-এর আবেদন বাতিল করেছেন।`,
+        "kyc",
+        "/admin/kyc"
+      );
+      await db.query(
+        `INSERT INTO notifications (recipient_type, recipient_id, institution_id, title, message, type, link, is_read, created_at)
+         VALUES ('institution', NULL, ?, ?, ?, 'kyc', '/institution/applications', 0, NOW())`,
+        [
+          instId,
+          `মার্চেন্ট অনবোর্ডিং আবেদন বাতিল`,
+          `মার্চেন্ট ${company} (${merchant.merchant_code}) আপনার প্রতিষ্ঠানে অনবোর্ডিংয়ের আবেদন বাতিল করেছেন।`,
+        ]
+      );
+      await db.query(
+        `INSERT INTO notifications (recipient_type, recipient_id, institution_id, title, message, type, link, is_read, created_at)
+         VALUES ('merchant', ?, ?, ?, ?, 'system', '/merchant/payment-methods', 0, NOW())`,
+        [
+          userId,
+          instId,
+          `আবেদন বাতিল সম্পন্ন`,
+          `আপনি ${instName}-এর আবেদন সফলভাবে বাতিল করেছেন। পরবর্তীতে পুনরায় আবেদন করতে চাইলে অ্যাডমিন/ব্যাংকের অনুমতির প্রয়োজন হবে।`,
+        ]
+      );
+    } catch (_) {}
+
+    return {
+      success: true,
+      message: `${instName}-এর আবেদন সফলভাবে বাতিল করা হয়েছে।`,
+      institutionId: instId,
+    };
+  },
+
+  /**
+   * Check re-apply eligibility when merchant wants to apply to an institution they previously cancelled
+   */
+  async checkReapplyEligibility(userId, institutionId) {
+    const instId = Number(institutionId);
+    if (!instId || isNaN(instId) || instId <= 0) {
+      const err = new Error("Invalid institution ID.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
+    if (!merchant) {
+      const err = new Error("Merchant account not found.");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const [instRows] = await db.query(
+      "SELECT id, name, name_bn FROM institutions WHERE id = ? LIMIT 1",
+      [instId]
+    );
+    const instName = instRows[0]?.name || "সংশ্লিষ্ট ব্যাংক বা MFS";
+
+    // 1. Check if there is a cancelled application in merchant_gateway_applications or history
+    const [cancelledApp] = await db.query(
+      `SELECT id, status FROM merchant_gateway_applications 
+       WHERE merchant_id = ? AND institution_id = ? AND status = 'cancelled' LIMIT 1`,
+      [merchant.id, instId]
+    );
+
+    const [cancelledHist] = await db.query(
+      `SELECT id FROM merchant_histories 
+       WHERE merchant_id = ? AND (action = 'cancel_application' OR action = 'cancel_request')
+         AND JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.institutionId')) = ?
+       ORDER BY id DESC LIMIT 1`,
+      [merchant.id, String(instId)]
+    );
+
+    const wasCancelled = cancelledApp.length > 0 || cancelledHist.length > 0;
+
+    if (!wasCancelled) {
+      return {
+        canApplyDirectly: true,
+        institutionId: instId,
+        institutionName: instName,
+      };
+    }
+
+    // 2. If it was cancelled, check if admin or institution has re-approved/reactivated it
+    // Check if an availability request exists with status 'reactivated' or 'approved'
+    const [reactivatedReq] = await db.query(
+      `SELECT id, request_status FROM institution_availability_requests 
+       WHERE merchant_id = ? AND institution_id = ? AND request_status = 'reactivated' LIMIT 1`,
+      [merchant.id, instId]
+    );
+
+    if (reactivatedReq.length > 0) {
+      return {
+        canApplyDirectly: true,
+        institutionId: instId,
+        institutionName: instName,
+        reactivated: true,
+      };
+    }
+
+    // Check if a reapply request is already pending
+    const [pendingReapply] = await db.query(
+      `SELECT id, requested_at FROM institution_availability_requests 
+       WHERE merchant_id = ? AND institution_id = ? AND request_status = 'reapply_pending' LIMIT 1`,
+      [merchant.id, instId]
+    );
+
+    // If not pending yet, automatically create reapply_pending notification request
+    if (pendingReapply.length === 0) {
+      await db.query(
+        `INSERT INTO institution_availability_requests (merchant_id, institution_id, request_status, requested_at)
+         VALUES (?, ?, 'reapply_pending', NOW())`,
+        [merchant.id, instId]
+      );
+
+      // Fetch company name
+      const [prof] = await db.query(
+        "SELECT company_name FROM merchant_profiles WHERE merchant_id = ? LIMIT 1",
+        [merchant.id]
+      );
+      const company = prof[0]?.company_name || merchant.merchant_code || `Merchant #${merchant.id}`;
+
+      // Notify Admin and Institution
+      try {
+        await merchantRepository.createAdminNotification(
+          `বাতিলকৃত প্রতিষ্ঠানে পুনরায় আবেদনের অনুরোধ: ${instName}`,
+          `মার্চেন্ট ${company} (${merchant.merchant_code}) পূর্বে ${instName}-এর আবেদন বাতিল করেছিলেন। তিনি পুনরায় আবেদনের জন্য অনুমোদন চেয়েছেন।`,
+          "kyc",
+          "/admin/kyc"
+        );
+        await db.query(
+          `INSERT INTO notifications (recipient_type, recipient_id, institution_id, title, message, type, link, is_read, created_at)
+           VALUES ('institution', NULL, ?, ?, ?, 'kyc', '/institution/merchants', 0, NOW())`,
+          [
+            instId,
+            `পুনরায় অনবোর্ডিং অনুমোদন অনুরোধ`,
+            `মার্চেন্ট ${company} (${merchant.merchant_code}) পূর্বে আপনার প্রতিষ্ঠানে আবেদন বাতিল করেছিলেন এবং এখন পুনরায় অনবোর্ডিং শুরু করতে অনুমোদন চেয়েছেন।`,
+          ]
+        );
+      } catch (_) {}
+    }
+
+    return {
+      canApplyDirectly: false,
+      needsReactivation: true,
+      institutionId: instId,
+      institutionName: instName,
+      message: `অপেক্ষা করুন, আপনি ইতিপূর্বে ${instName}-এর আবেদন বাতিল করেছিলেন। আপনার সাথে অতিশীঘ্রই যোগাযোগ করা হবে এবং অ্যাডমিন বা সংশ্লিষ্ট প্রতিষ্ঠান থেকে সক্রিয় (Active) করার পর আপনি পুনরায় অনবোর্ডিং শুরু করতে পারবেন।`,
+    };
+  },
+
+  /**
    * Get consolidated payment methods / institution cards for merchant
    */
   async getMerchantPaymentMethods(userId) {
@@ -4367,7 +4596,7 @@ function toSnakeCaseKey(str) {
     );
 
     let primaryAccount = null;
-    if (primaryRows.length > 0 && primaryRows[0].institution_id) {
+    if (primaryRows.length > 0 && primaryRows[0].institution_id && String(primaryRows[0].app_status || "").toLowerCase() !== "cancelled") {
       const p = primaryRows[0];
       const isApproved = String(p.account_status).toLowerCase() === "approved" || String(p.app_status).toLowerCase() === "approved";
       primaryAccount = {
@@ -4406,7 +4635,9 @@ function toSnakeCaseKey(str) {
       [merchant.id]
     );
 
-    const submittedAccounts = otherAppRows.map((r) => {
+    const submittedAccounts = otherAppRows
+      .filter((r) => String(r.app_status).toLowerCase() !== "cancelled")
+      .map((r) => {
       let snap = {};
       try {
         snap = typeof r.submitted_data_snapshot === "string" ? JSON.parse(r.submitted_data_snapshot) : (r.submitted_data_snapshot || {});
@@ -4457,6 +4688,7 @@ function toSnakeCaseKey(str) {
       .filter((r) => !appliedInstIds.has(Number(r.institution_id)))
       .map((r) => {
         const isLive = Boolean(r.is_onboarding_active);
+        const isReapplyHold = r.request_status === "reapply_pending";
         return {
           requestId: r.id,
           institutionId: r.institution_id,
@@ -4465,13 +4697,14 @@ function toSnakeCaseKey(str) {
           institutionType: r.institution_type,
           logoUrl: r.logo_url,
           channel: r.institution_type === "mfs" ? "mfs" : "bank",
-          requestStatus: r.request_status, // 'pending' or 'notified'
+          requestStatus: r.request_status, // 'pending', 'notified', 'reapply_pending'
           isOnboardingActive: isLive,
-          canStart: isLive, // Start button visible when institution onboarding process has started
-          cardTitle: "Onboarding Pending",
-          badgeText: "Requested",
+          canStart: isLive && !isReapplyHold, // Start button disabled/hidden if waiting for admin/institution reapply approval
+          cardTitle: isReapplyHold ? "Re-apply Under Review" : "Onboarding Pending",
+          badgeText: isReapplyHold ? "Approval Pending" : "Requested",
           requestedAt: r.requested_at,
           notifiedAt: r.notified_at,
+          isReapplyHold,
         };
       });
 
@@ -4501,6 +4734,7 @@ function toSnakeCaseKey(str) {
       primaryAccount,
       submittedAccounts,
       requestedAccounts,
+      appliedInstitutionIds: Array.from(appliedInstIds),
       overview,
     };
   },
@@ -4555,17 +4789,30 @@ function toSnakeCaseKey(str) {
       [merchant.id, instId]
     );
 
+    const hasExistingAccount = payload.hasExistingAccount !== undefined 
+      ? (payload.hasExistingAccount === true || payload.hasExistingAccount === "yes" || payload.hasExistingAccount === "true")
+      : true;
+
     const snapshot = {
       institutionId: instId,
       institutionName: inst.name,
       institutionType: inst.institution_type,
       channel: inst.institution_type === "mfs" ? "mfs" : "bank",
-      accountName: payload.accountName || payload.accountHolderName || "",
-      accountNumber: payload.accountNumber || payload.phone || payload.walletNumber || "",
-      branchName,
-      branchId: payload.branchId || null,
-      routingNumber,
+      hasExistingAccount: hasExistingAccount ? "yes" : "no",
+      companyName: payload.companyName || "",
+      businessType: payload.businessType || "",
+      ownerName: payload.ownerName || payload.authorizedPersonName || "",
+      nidNumber: payload.nidNumber || "",
+      contactPhone: payload.contactPhone || payload.phone || "",
+      address: payload.address || "",
+      accountName: payload.accountName || payload.accountHolderName || payload.companyName || "",
+      accountNumber: hasExistingAccount ? (payload.accountNumber || payload.phone || payload.walletNumber || "") : "",
+      branchName: hasExistingAccount ? branchName : (payload.preferredBranch || ""),
+      branchId: hasExistingAccount ? (payload.branchId || null) : null,
+      routingNumber: hasExistingAccount ? routingNumber : "",
       accountType: payload.accountType || (inst.institution_type === "mfs" ? "Merchant" : "Current"),
+      preferredBranch: payload.preferredBranch || "",
+      applyNewAccount: !hasExistingAccount,
       appliedAt: new Date().toISOString(),
     };
 

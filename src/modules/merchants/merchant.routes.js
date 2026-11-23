@@ -41,6 +41,8 @@ router.post("/institutions/availability-requests/:institutionId/cancel", merchan
 // Payment Methods (পেমেন্ট মাধ্যম)
 router.get("/me/payment-methods", merchantController.getPaymentMethods);
 router.post("/me/payment-methods/submit-account", merchantController.submitInstitutionSpecificAccount);
+router.post("/me/payment-methods/cancel-application", merchantController.cancelPaymentMethodApplication);
+router.post("/me/payment-methods/check-reapply", merchantController.checkReapplyEligibility);
 router.get("/geo/divisions", merchantController.getGeoDivisions);
 router.get("/geo/districts", merchantController.getGeoDistricts);
 router.get("/geo/upazilas", merchantController.getGeoUpazilas);

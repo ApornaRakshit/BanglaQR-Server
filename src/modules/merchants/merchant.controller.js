@@ -655,6 +655,33 @@ export const merchantController = {
     }
   },
 
+  async cancelPaymentMethodApplication(req, res, next) {
+    try {
+      const institutionId = req.body?.institutionId || req.params?.institutionId;
+      const data = await merchantService.cancelPaymentMethodApplication(req.user.id, institutionId);
+      res.json({
+        success: true,
+        message: data.message,
+        data,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async checkReapplyEligibility(req, res, next) {
+    try {
+      const institutionId = req.body?.institutionId || req.params?.institutionId;
+      const data = await merchantService.checkReapplyEligibility(req.user.id, institutionId);
+      res.json({
+        success: true,
+        data,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
   async updateLastVisitedStep(req, res, next) {
     try {
       const { path } = req.body;
