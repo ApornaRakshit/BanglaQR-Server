@@ -47,3 +47,4 @@
 # Ignore ZIP and backup archives
 *.zip
 *.bundle
+.htaccess
