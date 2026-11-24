@@ -17,7 +17,7 @@ import { adminSettingsRepository } from "../admin/settings/admin.settings.module
 const FINAL_LOCKED_STATUSES = new Set(["approved", "active", "suspended"]);
 const REVIEW_LOCKED_STATUSES = new Set(["submitted", "under_review"]);
 
-async function requireEditableMerchant(userId, connectionOrDb = db) {
+async function requireEditableMerchant(userId, connectionOrDb = db, targetInstitutionId = null) {
   let merchant = await merchantRepository.findOrCreateMerchantByUserId(userId, connectionOrDb);
   const [lockedRows] = await connectionOrDb.execute(
     `SELECT * FROM merchants WHERE id = ? AND user_id = ? LIMIT 1 FOR UPDATE`,
@@ -33,6 +33,41 @@ async function requireEditableMerchant(userId, connectionOrDb = db) {
 
   const accountStatus = String(merchant.account_status || "draft").toLowerCase();
   const kycStatus = String(merchant.kyc_status || "pending").toLowerCase();
+
+  // If a specific institution is provided, check if THAT specific institution's application is locked.
+  // A merchant is allowed to apply to multiple institutions independently.
+  if (targetInstitutionId) {
+    const [instAppRows] = await connectionOrDb.execute(
+      `SELECT status FROM merchant_gateway_applications
+       WHERE merchant_id = ? AND institution_id = ? LIMIT 1`,
+      [merchant.id, Number(targetInstitutionId)]
+    );
+    if (instAppRows.length > 0) {
+      const instStatus = String(instAppRows[0].status).toLowerCase();
+      if (instStatus === "draft" || instStatus === "cancelled" || instStatus === "additional_information_required") {
+        return merchant; // Editable for this institution!
+      }
+    } else {
+      return merchant; // No application submitted for this institution yet - fully editable!
+    }
+  }
+
+  // Check if merchant is working on a new/draft institution in merchant_profiles
+  const [profRows] = await connectionOrDb.execute(
+    `SELECT institution_id FROM merchant_profiles WHERE merchant_id = ? LIMIT 1`,
+    [merchant.id]
+  );
+  const activeProfileInstId = profRows[0]?.institution_id ? Number(profRows[0].institution_id) : null;
+  if (activeProfileInstId) {
+    const [activeAppRows] = await connectionOrDb.execute(
+      `SELECT status FROM merchant_gateway_applications
+       WHERE merchant_id = ? AND institution_id = ? LIMIT 1`,
+      [merchant.id, activeProfileInstId]
+    );
+    if (activeAppRows.length === 0 || activeAppRows[0].status === "draft" || activeAppRows[0].status === "cancelled") {
+      return merchant; // Active institution is currently in draft/fresh mode!
+    }
+  }
 
   if (FINAL_LOCKED_STATUSES.has(accountStatus)) {
     const error = new Error("This merchant application is finalized. Editing is disabled.");
@@ -361,7 +396,14 @@ export const merchantService = {
       ).then(([rows]) => rows).catch(() => []),
     ]);
 
-    const targetInstId = kyc?.institution_id || profile?.institution_id || 0;
+    // Check if merchant has an active onboarding_kyc application submitted
+    const [activeKycs] = await db.query(
+      `SELECT institution_id FROM merchant_gateway_applications
+       WHERE merchant_id = ? AND application_type = 'onboarding_kyc' AND status != 'cancelled'
+       ORDER BY id ASC LIMIT 1`,
+      [merchant.id]
+    );
+    const targetInstId = activeKycs.length > 0 ? activeKycs[0].institution_id : (kyc?.institution_id || profile?.institution_id || 0);
     let selectedInstitution = null;
     if (targetInstId) {
       const [instRows] = await db.query(
@@ -618,7 +660,7 @@ export const merchantService = {
     await conn.beginTransaction();
 
     try {
-      const merchant = await requireEditableMerchant(userId, conn);
+      const merchant = await requireEditableMerchant(userId, conn, data?.institutionId);
       const payload = { ...data };
 
       // Persist Merchant Segment if provided (Strictly 'micro' or 'big')
@@ -631,14 +673,17 @@ export const merchantService = {
         }
       }
 
-      // 1. Channel Protection: Payment channel is established via Onboarding Setup and cannot be tampered with via arbitrary company update
+      // 1. Channel Protection: Payment channel is established via Onboarding Setup.
+      // If switching or selecting a new institution/channel in setup, allow updating channel.
       const [existingProfile] = await conn.query(
         "SELECT institution_id, channel, legal_structure_id, industry_category_id FROM merchant_profiles WHERE merchant_id = ? LIMIT 1",
         [merchant.id]
       );
       if (existingProfile.length > 0 && existingProfile[0].channel) {
-        // Enforce existing authenticated channel, preventing override via form payload
-        payload.channel = existingProfile[0].channel;
+        // Enforce existing channel only if not explicitly updating channel with an institutionId change
+        if (!payload.channel) {
+          payload.channel = existingProfile[0].channel;
+        }
       }
 
       // Safe Institution Validation: Only check availability when selecting/changing an institution
@@ -894,6 +939,24 @@ function toSnakeCaseKey(str) {
         }
       }
 
+      // 4. Ensure draft gateway application exists for this target institution so it appears in Payment Methods immediately
+      if (payload.institutionId) {
+        const targetInstId = Number(payload.institutionId);
+        const [existingApps] = await conn.query(
+          "SELECT id, status FROM merchant_gateway_applications WHERE merchant_id = ? AND institution_id = ? LIMIT 1",
+          [merchant.id, targetInstId]
+        );
+        if (existingApps.length === 0) {
+          const appNumber = `APP-${Date.now().toString().slice(-6)}`;
+          await conn.query(
+            `INSERT INTO merchant_gateway_applications
+             (application_number, application_type, merchant_id, institution_id, status, gateway_name, applied_at, created_at, updated_at)
+             VALUES (?, 'onboarding_kyc', ?, ?, 'draft', ?, NOW(), NOW(), NOW())`,
+            [appNumber, merchant.id, targetInstId, payload.bankName || "Partner Institution"]
+          );
+        }
+      }
+
       await merchantRepository.updateMerchantStep(merchant.id, 2, conn);
       await merchantRepository.createHistory(
         merchant.id,
@@ -920,7 +983,7 @@ function toSnakeCaseKey(str) {
     await conn.beginTransaction();
 
     try {
-      const merchant = await requireEditableMerchant(userId, conn);
+      const merchant = await requireEditableMerchant(userId, conn, data?.institutionId);
 
       // Validate NID uniqueness across active/submitted/registered merchants (excluding current merchant)
       if (data.nidNo && data.nidNo.trim()) {
@@ -1038,7 +1101,7 @@ function toSnakeCaseKey(str) {
     await conn.beginTransaction();
 
     try {
-      const merchant = await requireEditableMerchant(userId, conn);
+      const merchant = await requireEditableMerchant(userId, conn, data?.institutionId);
       await merchantRepository.upsertCommercial(merchant.id, data, conn);
       await merchantRepository.updateMerchantStep(merchant.id, 4, conn);
       await merchantRepository.createHistory(
@@ -1111,7 +1174,7 @@ function toSnakeCaseKey(str) {
     await conn.beginTransaction();
 
     try {
-      const merchant = await requireEditableMerchant(userId, conn);
+      const merchant = await requireEditableMerchant(userId, conn, data?.institutionId);
 
       const payload = { ...data };
 
@@ -1270,6 +1333,48 @@ function toSnakeCaseKey(str) {
         await merchantRepository.upsertCommercial(merchant.id, commercialPatch, conn);
       }
 
+      // Sync account details into draft gateway application snapshot if institutionId provided
+      if (payload.institutionId) {
+        const targetInstId = Number(payload.institutionId);
+        const [appRows] = await conn.query(
+          "SELECT id, status, submitted_data_snapshot FROM merchant_gateway_applications WHERE merchant_id = ? AND institution_id = ? LIMIT 1",
+          [merchant.id, targetInstId]
+        );
+        let curSnap = {};
+        if (appRows.length > 0 && appRows[0].submitted_data_snapshot) {
+          try {
+            curSnap = typeof appRows[0].submitted_data_snapshot === "string" ? JSON.parse(appRows[0].submitted_data_snapshot) : appRows[0].submitted_data_snapshot;
+          } catch (_) {}
+        }
+        const updatedSnap = {
+          ...curSnap,
+          institutionId: targetInstId,
+          institutionName: payload.bankName || curSnap.institutionName || "",
+          accountHolderName: payload.accountHolderName || curSnap.accountHolderName || "",
+          accountName: payload.accountHolderName || curSnap.accountName || "",
+          accountNumber: payload.accountNumber || curSnap.accountNumber || "",
+          branchName: payload.branchName || curSnap.branchName || "",
+          routingNumber: payload.routingNumber || curSnap.routingNumber || "",
+          accountType: payload.accountType || curSnap.accountType || "",
+        };
+        if (appRows.length > 0) {
+          if (appRows[0].status === "draft") {
+            await conn.query(
+              "UPDATE merchant_gateway_applications SET submitted_data_snapshot = ?, branch_id = COALESCE(?, branch_id), updated_at = NOW() WHERE id = ?",
+              [JSON.stringify(updatedSnap), payload.branchId || null, appRows[0].id]
+            );
+          }
+        } else {
+          const appNumber = `APP-${Date.now().toString().slice(-6)}`;
+          await conn.query(
+            `INSERT INTO merchant_gateway_applications
+             (application_number, application_type, merchant_id, institution_id, branch_id, status, gateway_name, submitted_data_snapshot, applied_at, created_at, updated_at)
+             VALUES (?, 'onboarding_kyc', ?, ?, ?, 'draft', ?, ?, NOW(), NOW(), NOW())`,
+            [appNumber, merchant.id, targetInstId, payload.branchId || null, payload.bankName || "Partner Institution", JSON.stringify(updatedSnap)]
+          );
+        }
+      }
+
       await merchantRepository.updateMerchantStep(merchant.id, 4, conn);
       await merchantRepository.createHistory(
         merchant.id,
@@ -1352,7 +1457,7 @@ function toSnakeCaseKey(str) {
     }));
   },
 
-  async uploadDocument(userId, file, { documentType, documentName, customLabel }) {
+  async uploadDocument(userId, file, { documentType, documentName, customLabel, institutionId }) {
     if (!file) {
       const error = new Error("No file selected for upload");
       error.statusCode = 400;
@@ -1368,7 +1473,7 @@ function toSnakeCaseKey(str) {
         // Business outlet / shop photo can be uploaded anytime by the merchant
         merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
       } else {
-        merchant = await requireEditableMerchant(userId);
+        merchant = await requireEditableMerchant(userId, db, institutionId);
       }
     } catch (error) {
       if (file.path) await secureStorage.deletePhysicalFile(file.path).catch(() => {});
@@ -1405,7 +1510,7 @@ function toSnakeCaseKey(str) {
       if (isOutletPhoto) {
         merchant = await merchantRepository.findOrCreateMerchantByUserId(userId, conn);
       } else {
-        merchant = await requireEditableMerchant(userId, conn);
+        merchant = await requireEditableMerchant(userId, conn, institutionId);
       }
       existingDoc = await merchantRepository.getDocumentByType(merchant.id, normalizedType, conn);
       wasRejected = Boolean(existingDoc && (
@@ -1546,14 +1651,14 @@ function toSnakeCaseKey(str) {
     };
   },
 
-  async replaceDocument(userId, docId, file, { documentName, customLabel }) {
+  async replaceDocument(userId, docId, file, { documentName, customLabel, institutionId }) {
     if (!file) {
       const error = new Error("No replacement file uploaded");
       error.statusCode = 400;
       throw error;
     }
 
-    const normalizedType = normalizeDocType(documentType);
+    const normalizedType = normalizeDocType(documentName);
     const isOutletPhoto = normalizedType === "BUSINESS_OUTLET_PHOTO";
 
     let merchant;
@@ -1562,7 +1667,7 @@ function toSnakeCaseKey(str) {
         // Business outlet / shop photo can be uploaded anytime by the merchant
         merchant = await merchantRepository.findOrCreateMerchantByUserId(userId);
       } else {
-        merchant = await requireEditableMerchant(userId);
+        merchant = await requireEditableMerchant(userId, db, institutionId);
       }
     } catch (error) {
       if (file.path) await secureStorage.deletePhysicalFile(file.path).catch(() => {});
@@ -1612,7 +1717,7 @@ function toSnakeCaseKey(str) {
 
       // If document is not a business outlet photo, enforce editable merchant rule
       if (existingDoc.document_type !== "BUSINESS_OUTLET_PHOTO") {
-        merchant = await requireEditableMerchant(userId, conn);
+        merchant = await requireEditableMerchant(userId, conn, institutionId);
       }
       if (existingDoc.storage_key !== initialDoc.storage_key) {
         const error = new Error("This document was changed by another request. Refresh and retry.");
@@ -1764,7 +1869,7 @@ function toSnakeCaseKey(str) {
 
       // If document is not a business outlet photo, enforce editable merchant rule
       if (existingDoc.document_type !== "BUSINESS_OUTLET_PHOTO") {
-        merchant = await requireEditableMerchant(userId, conn);
+        merchant = await requireEditableMerchant(userId, conn, institutionId);
       }
 
       await merchantRepository.deleteDocument(docId, merchant.id, conn);
@@ -1902,7 +2007,7 @@ function toSnakeCaseKey(str) {
     };
   },
 
-  async submitApplication(userId) {
+  async submitApplication(userId, targetInstitutionId = null) {
     const conn = await db.getConnection();
     let merchant;
     let profile;
@@ -1932,30 +2037,39 @@ function toSnakeCaseKey(str) {
         throw error;
       }
 
-      const currentStatus = String(merchant.account_status || "draft").toLowerCase();
-      if (["submitted", "under_review"].includes(currentStatus)) {
-        const error = new Error("Your application has already been submitted and is currently under review");
-        error.statusCode = 409;
-        error.code = "APPLICATION_ALREADY_SUBMITTED";
-        throw error;
-      }
-
-      if (["approved", "active", "suspended"].includes(currentStatus)) {
-        const error = new Error("Your merchant account is finalized. A new submission is not permitted.");
-        error.statusCode = 409;
-        error.code = "MERCHANT_APPLICATION_FINALIZED";
-        throw error;
-      }
-
-      // Read every onboarding record on the same transaction/connection while the
-      // merchant row is locked. All merchant-side update endpoints acquire this
-      // same row lock, so submission and edits cannot race each other.
+      // Check if target institution is already submitted
       profile = await merchantRepository.getProfile(merchant.id, conn);
       contact = await merchantRepository.getContact(merchant.id, conn);
       commercial = await merchantRepository.getCommercial(merchant.id, conn);
       kyc = await merchantRepository.getKyc(merchant.id, conn);
       documents = await merchantRepository.getDocuments(merchant.id, conn);
       verification = await merchantRepository.getUserVerification(userId, conn);
+
+      selectedInstId = targetInstitutionId || kyc?.institution_id || profile?.institution_id || null;
+
+      if (selectedInstId) {
+        const [existingInstApps] = await conn.query(
+          `SELECT id, status FROM merchant_gateway_applications WHERE merchant_id = ? AND institution_id = ? LIMIT 1`,
+          [merchant.id, Number(selectedInstId)]
+        );
+        if (existingInstApps.length > 0) {
+          const appSt = String(existingInstApps[0].status).toLowerCase();
+          if (["applied", "under_review", "approved"].includes(appSt)) {
+            const error = new Error("This institution application has already been submitted and is currently under review");
+            error.statusCode = 409;
+            error.code = "APPLICATION_ALREADY_SUBMITTED";
+            throw error;
+          }
+        }
+      } else {
+        const currentStatus = String(merchant.account_status || "draft").toLowerCase();
+        if (["submitted", "under_review"].includes(currentStatus)) {
+          const error = new Error("Your application has already been submitted and is currently under review");
+          error.statusCode = 409;
+          error.code = "APPLICATION_ALREADY_SUBMITTED";
+          throw error;
+        }
+      }
 
       const missing = [];
       if (!profile || !profile.company_name) {
@@ -4578,49 +4692,107 @@ function toSnakeCaseKey(str) {
     if (!merchant) return { primaryAccount: null, requestedAccounts: [], availableInstitutions: [] };
 
     // 1. Primary onboarding institution & application info
-    const [primaryRows] = await db.query(
-      `SELECT m.account_status, m.kyc_status,
-              mp.institution_id as profile_inst_id, mp.bank_name as profile_bank_name, mp.channel,
-              mp.branch_name, mp.routing_number,
-              i.id as institution_id, i.name as institution_name, i.institution_code,
-              i.logo_url, i.institution_type, i.is_onboarding_active,
-              mga.id as app_id, mga.status as app_status, mga.applied_at,
-              mk.bank_account_name, mk.bank_account_number, mk.account_type as kyc_account_type
-       FROM merchants m
+    // If merchant has an applied application in merchant_gateway_applications, that is the primary applied institution.
+    // Otherwise fall back to merchant_profiles.
+    const [primaryAppRows] = await db.query(
+      `SELECT mga.id as app_id, mga.institution_id, mga.status as app_status, mga.applied_at, mga.submitted_data_snapshot,
+              i.name as institution_name, i.institution_code, i.logo_url, i.institution_type, i.is_onboarding_active,
+              m.account_status, m.kyc_status,
+              mk.bank_account_name, mk.bank_account_number, mk.account_type as kyc_account_type,
+              mp.branch_name, mp.routing_number, mp.channel as profile_channel
+       FROM merchant_gateway_applications mga
+       JOIN institutions i ON i.id = mga.institution_id
+       JOIN merchants m ON m.id = mga.merchant_id
        LEFT JOIN merchant_profiles mp ON mp.merchant_id = m.id
-       LEFT JOIN institutions i ON i.id = mp.institution_id
-       LEFT JOIN merchant_gateway_applications mga ON mga.merchant_id = m.id AND mga.institution_id = mp.institution_id
        LEFT JOIN merchant_kyc mk ON mk.merchant_id = m.id
-       WHERE m.id = ? LIMIT 1`,
+       WHERE mga.merchant_id = ? AND mga.status != 'cancelled'
+       ORDER BY mga.id ASC LIMIT 1`,
       [merchant.id]
     );
 
     let primaryAccount = null;
-    if (primaryRows.length > 0 && primaryRows[0].institution_id && String(primaryRows[0].app_status || "").toLowerCase() !== "cancelled") {
-      const p = primaryRows[0];
-      const isApproved = String(p.account_status).toLowerCase() === "approved" || String(p.app_status).toLowerCase() === "approved";
+    let primaryInstId = null;
+
+    if (primaryAppRows.length > 0) {
+      const p = primaryAppRows[0];
+      primaryInstId = Number(p.institution_id);
+      let snap = {};
+      try {
+        snap = typeof p.submitted_data_snapshot === "string" ? JSON.parse(p.submitted_data_snapshot) : (p.submitted_data_snapshot || {});
+      } catch (_) {}
+
+      const isApproved = String(p.app_status).toLowerCase() === "approved" || String(p.account_status).toLowerCase() === "approved";
+      const isDraft = String(p.app_status).toLowerCase() === "draft";
+
       primaryAccount = {
         institutionId: p.institution_id,
-        institutionName: p.institution_name || p.profile_bank_name,
+        institutionName: p.institution_name,
         institutionCode: p.institution_code,
         institutionType: p.institution_type,
         logoUrl: p.logo_url,
-        channel: p.channel || (p.institution_type === "mfs" ? "mfs" : "bank"),
+        channel: snap.channel || p.profile_channel || (p.institution_type === "mfs" ? "mfs" : "bank"),
         isOnboardingActive: Boolean(p.is_onboarding_active),
         accountStatus: p.account_status,
-        appStatus: p.app_status,
+        appStatus: p.app_status || (isDraft ? "draft" : "applied"),
+        isDraft,
         isApproved,
-        cardTitle: isApproved ? "Approved" : "Application Submitted",
-        badgeText: isApproved ? "Approved" : "Pending",
+        cardTitle: isApproved ? "Approved" : (isDraft ? "Onboarding In Progress" : "Application Submitted"),
+        badgeText: isApproved ? "Approved" : (isDraft ? "Draft" : "Pending"),
         appliedAt: p.applied_at,
         accountDetails: {
-          accountName: p.bank_account_name,
-          accountNumber: p.bank_account_number,
-          branchName: p.branch_name,
-          routingNumber: p.routing_number,
-          accountType: p.kyc_account_type,
+          accountName: snap.accountName || p.bank_account_name,
+          accountNumber: snap.accountNumber || p.bank_account_number,
+          branchName: snap.branchName || p.branch_name,
+          routingNumber: snap.routingNumber || p.routing_number,
+          accountType: snap.accountType || p.kyc_account_type,
         },
       };
+    } else {
+      // Fallback to merchant_profiles if no gateway application exists yet
+      const [primaryRows] = await db.query(
+        `SELECT m.account_status, m.kyc_status,
+                mp.institution_id as profile_inst_id, mp.bank_name as profile_bank_name, mp.channel,
+                mp.branch_name, mp.routing_number,
+                i.id as institution_id, i.name as institution_name, i.institution_code,
+                i.logo_url, i.institution_type, i.is_onboarding_active,
+                mk.bank_account_name, mk.bank_account_number, mk.account_type as kyc_account_type
+         FROM merchants m
+         LEFT JOIN merchant_profiles mp ON mp.merchant_id = m.id
+         LEFT JOIN institutions i ON i.id = mp.institution_id
+         LEFT JOIN merchant_kyc mk ON mk.merchant_id = m.id
+         WHERE m.id = ? LIMIT 1`,
+        [merchant.id]
+      );
+
+      if (primaryRows.length > 0 && primaryRows[0].institution_id) {
+        const p = primaryRows[0];
+        primaryInstId = Number(p.institution_id);
+        const isApproved = String(p.account_status).toLowerCase() === "approved";
+        const isDraft = String(p.account_status).toLowerCase() === "draft";
+        primaryAccount = {
+          institutionId: p.institution_id,
+          institutionName: p.institution_name || p.profile_bank_name,
+          institutionCode: p.institution_code,
+          institutionType: p.institution_type,
+          logoUrl: p.logo_url,
+          channel: p.channel || (p.institution_type === "mfs" ? "mfs" : "bank"),
+          isOnboardingActive: Boolean(p.is_onboarding_active),
+          accountStatus: p.account_status,
+          appStatus: isDraft ? "draft" : "applied",
+          isDraft,
+          isApproved,
+          cardTitle: isApproved ? "Approved" : (isDraft ? "Onboarding In Progress" : "Application Submitted"),
+          badgeText: isApproved ? "Approved" : (isDraft ? "Draft" : "Pending"),
+          appliedAt: null,
+          accountDetails: {
+            accountName: p.bank_account_name,
+            accountNumber: p.bank_account_number,
+            branchName: p.branch_name,
+            routingNumber: p.routing_number,
+            accountType: p.kyc_account_type,
+          },
+        };
+      }
     }
 
     // 2. Fetch all other gateway applications submitted by this merchant for additional institutions
@@ -4630,7 +4802,7 @@ function toSnakeCaseKey(str) {
        FROM merchant_gateway_applications mga
        JOIN institutions i ON i.id = mga.institution_id
        WHERE mga.merchant_id = ?
-       ${primaryAccount ? "AND mga.institution_id != " + Number(primaryAccount.institutionId) : ""}
+       ${primaryInstId ? "AND mga.institution_id != " + Number(primaryInstId) : ""}
        ORDER BY mga.applied_at DESC`,
       [merchant.id]
     );
@@ -4643,6 +4815,7 @@ function toSnakeCaseKey(str) {
         snap = typeof r.submitted_data_snapshot === "string" ? JSON.parse(r.submitted_data_snapshot) : (r.submitted_data_snapshot || {});
       } catch (_) {}
       const isAppApproved = String(r.app_status).toLowerCase() === "approved";
+      const isAppDraft = String(r.app_status).toLowerCase() === "draft";
       return {
         applicationId: r.app_id,
         institutionId: r.institution_id,
@@ -4653,9 +4826,10 @@ function toSnakeCaseKey(str) {
         channel: snap.channel || (r.institution_type === "mfs" ? "mfs" : "bank"),
         isOnboardingActive: Boolean(r.is_onboarding_active),
         appStatus: r.app_status,
+        isDraft: isAppDraft,
         isApproved: isAppApproved,
-        cardTitle: isAppApproved ? "Approved" : "Application Submitted",
-        badgeText: isAppApproved ? "Approved" : "Pending",
+        cardTitle: isAppApproved ? "Approved" : (isAppDraft ? "Onboarding In Progress" : "Application Submitted"),
+        badgeText: isAppApproved ? "Approved" : (isAppDraft ? "Draft" : "Pending"),
         appliedAt: r.applied_at,
         accountDetails: {
           accountName: snap.accountName || "",

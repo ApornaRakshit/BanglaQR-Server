@@ -195,7 +195,8 @@ export const merchantController = {
 
   async submitApplication(req, res, next) {
     try {
-      const result = await merchantService.submitApplication(req.user.id);
+      const targetInstitutionId = req.body?.institutionId || req.query?.institutionId || null;
+      const result = await merchantService.submitApplication(req.user.id, targetInstitutionId);
       res.json(result);
     } catch (error) {
       next(error);

@@ -139,6 +139,7 @@ export const contactDraftSchema = z.object({
   nomineeCustomRelation: z.string().trim().optional().nullable().default(""),
   nomineeMobile: z.preprocess((val) => (typeof val === "string" ? val.replace(/[\s-]/g, "") : (val ?? "")), z.string().optional().nullable().default("")),
   nomineeNid: z.string().trim().optional().nullable().default(""),
+  institutionId: z.preprocess((v) => v === "" ? null : v, z.coerce.number().positive().nullable().optional()),
   clearFields: z.array(z.string()).optional(),
 }).passthrough();
 
@@ -286,6 +287,7 @@ export const documentUploadSchema = z.object({
   ).transform((val) => val.toUpperCase()),
   documentName: z.string().trim().optional(),
   customLabel: z.string().trim().optional(),
+  institutionId: z.preprocess((v) => v === "" ? null : v, z.coerce.number().positive().nullable().optional()),
 });
 
 export const updateActivitiesSchema = z.object({
