@@ -218,7 +218,8 @@ function calculateProgress(profile, contact, commercial, kyc, documents, verific
       hasNomineeSignature,
     ];
 
-    if (isBigMerchant) {
+    const rawYearly = Number(String(kyc?.kycFormData?.yearlyEstimatedIncome || kyc?.yearlyEstimatedIncome || (Number(commercial?.volume_per_month || commercial?.volumePerMonth || 0) * 12)).replace(/[^0-9]/g, '')) || 0;
+    if (isBigMerchant && rawYearly > 4500000) {
       mandatoryItems.push(hasBin);
     }
     if (isBigMerchant && !isMfsChannel) {
@@ -1869,7 +1870,7 @@ function toSnakeCaseKey(str) {
 
       // If document is not a business outlet photo, enforce editable merchant rule
       if (existingDoc.document_type !== "BUSINESS_OUTLET_PHOTO") {
-        merchant = await requireEditableMerchant(userId, conn, institutionId);
+        merchant = await requireEditableMerchant(userId, conn);
       }
 
       await merchantRepository.deleteDocument(docId, merchant.id, conn);
@@ -2201,7 +2202,8 @@ function toSnakeCaseKey(str) {
         const code = normalizeDocType(req.requirement_code);
 
         // TIN is optional for both micro and big merchants; BIN and Cheque optional for micro
-        if (rawCode === "TIN_CERTIFICATE" || code === "TIN_CERTIFICATE" || (isMicro && (rawCode === "CANCELLED_BANK_CHEQUE" || rawCode === "BIN_CERTIFICATE" || code === "BANK_STATEMENT"))) {
+        const yearlyIncomeVal = Number(String(kyc?.kycFormData?.yearlyEstimatedIncome || kyc?.yearlyEstimatedIncome || (Number(commercial?.volume_per_month || commercial?.volumePerMonth || 0) * 12)).replace(/[^0-9]/g, '')) || 0;
+        if (rawCode === "TIN_CERTIFICATE" || code === "TIN_CERTIFICATE" || (isMicro && (rawCode === "CANCELLED_BANK_CHEQUE" || rawCode === "BIN_CERTIFICATE" || code === "BANK_STATEMENT")) || (rawCode === "BIN_CERTIFICATE" && yearlyIncomeVal <= 4500000)) {
           continue;
         }
 
